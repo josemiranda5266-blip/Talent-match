@@ -14,7 +14,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json bun.lock ./
-RUN bun install --production --frozen-lockfile
+RUN bun install --production --no-save
 COPY --from=build /app/dist ./dist
 
 EXPOSE 8080
