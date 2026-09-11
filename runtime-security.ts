@@ -30,6 +30,9 @@ const entitlementCache = new Map<string, { expiresAt: number; isPremium: boolean
 const FREE_AI_DAILY_LIMIT = 5;
 const PREMIUM_AI_DAILY_LIMIT = 100;
 const ENTITLEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_AI_REQUEST_BYTES = 100_000;
+const MAX_AI_CANDIDATES = 30;
+const MAX_AI_TEXT_LENGTH = 4_000;
 
 export function invalidatePremiumEntitlement(uid: string): void {
   const normalizedUid = String(uid || '').trim();
@@ -75,9 +78,40 @@ async function reserveDailyAiQuota(uid: string, day: string, limit: number): Pro
   });
 }
 
+function validateAiRequestShape(req: any, res: any): boolean {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    res.status(400).json({ error: 'Solicitud de IA inválida.' });
+    return false;
+  }
+  let serialized = '';
+  try { serialized = JSON.stringify(body); } catch {
+    res.status(400).json({ error: 'Solicitud de IA inválida.' });
+    return false;
+  }
+  if (serialized.length > MAX_AI_REQUEST_BYTES) {
+    res.status(413).json({ error: 'La solicitud de IA es demasiado grande.' });
+    return false;
+  }
+  for (const key of ['athletes', 'candidates']) {
+    if (body[key] !== undefined && (!Array.isArray(body[key]) || body[key].length > MAX_AI_CANDIDATES)) {
+      res.status(400).json({ error: `La lista ${key} supera el máximo permitido de ${MAX_AI_CANDIDATES} elementos.` });
+      return false;
+    }
+  }
+  for (const key of ['queryPrompt', 'question', 'clubName', 'athleteNotes', 'searchContext']) {
+    if (typeof body[key] === 'string' && body[key].length > MAX_AI_TEXT_LENGTH) {
+      res.status(400).json({ error: `El campo ${key} supera el máximo permitido.` });
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function enforceAiBudget(req: any, res: any, next: any) {
   const uid = String(req.user?.uid || '');
   if (!uid) return res.status(401).json({ error: 'Usuario autenticado requerido.' });
+  if (!validateAiRequestShape(req, res)) return;
   if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'La IA no está configurada en el servidor. Configure GEMINI_API_KEY antes de habilitar funciones de IA.' });
   const isPremium = await resolvePremiumEntitlement(uid);
   const limit = isPremium ? PREMIUM_AI_DAILY_LIMIT : FREE_AI_DAILY_LIMIT;
@@ -104,7 +138,10 @@ export function requirePaymentAuthentication(req: any, res: any, next: any) {
   });
 }
 
-export function markFinancialDataAsModelled(_req: any, res: any, next: any) {
+export function markFinancialDataAsModelled(req: any, res: any, next: any) {
+  if (!req.user) return requireAuthenticated(req, res, () => markFinancialDataAsModelled(req, res, next));
+  const claims = req.user || {};
+  if (claims.admin !== true && claims.role !== 'admin') return res.status(403).json({ error: 'Se requieren permisos administrativos.' });
   const originalJson = res.json.bind(res);
   res.json = (body: any) => {
     if (body && typeof body === 'object' && !Array.isArray(body)) body = { ...body, financialDataSource: 'MODELLED', productionMetricsConnected: false, dataWarning: 'Estos datos financieros son de modelo/simulación y no representan métricas contables o de producción verificadas.' };
