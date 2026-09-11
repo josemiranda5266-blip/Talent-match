@@ -135,8 +135,9 @@ function setCachedAIResponse(key: string, data: any) {
   aiCache.set(key, { timestamp: Date.now(), data });
 }
 
-function generateCacheKey(endpoint: string, payload: any): string {
-  const str = JSON.stringify(payload);
+function generateCacheKey(endpoint: string, payload: any, userId?: string): string {
+  const cacheScope = userId || 'anonymous';
+  const str = JSON.stringify({ cacheScope, payload });
   return endpoint + ':' + crypto.createHash('md5').update(str).digest('hex');
 }
 
@@ -796,7 +797,7 @@ app.get('/api/financial/summary', (_req, res) => {
     days365: {
       incomeUsd: parseFloat((totalIncomeUsd * 14.2).toFixed(2)),
       costsUsd: parseFloat((monthlyProjectedCostUsd * 14.2).toFixed(2)),
-      cashFlowUsd: parseFloat(((totalIncomeUsd - monthlyProjectedCostUsd) * 14.2).toFixed(2)),
+      cashFlowUsd: parseFloat((totalIncomeUsd * 14.2 - monthlyProjectedCostUsd * 14.2).toFixed(2)),
       incomeArs: Math.round(totalIncomeUsd * 14.2 * 1300)
     }
   };
@@ -1014,7 +1015,7 @@ app.post('/api/ai/match-candidates', async (req, res) => {
     // Limit candidates payload size to prevent token overflow
     const trimmedAthletes = verifiedAthletes.slice(0, 30);
 
-    const cacheKey = generateCacheKey('/api/ai/match-candidates', { search, athletesCount: trimmedAthletes.length, ids: trimmedAthletes.map(a => a.id) });
+    const cacheKey = generateCacheKey('/api/ai/match-candidates', { search, athletesCount: trimmedAthletes.length, ids: trimmedAthletes.map(a => a.id) }, req.user?.uid);
     const cached = getCachedAIResponse(cacheKey);
     if (cached) {
       return res.json(cached);
@@ -1062,6 +1063,7 @@ app.post('/api/ai/match-candidates', async (req, res) => {
         };
       });
 
+      setCachedAIResponse(cacheKey, { matches });
       return res.json({ matches });
     }
 
@@ -1867,19 +1869,19 @@ app.post('/api/mercadopago/create-preference', async (req, res) => {
       }
     }
 
-    // If 100% coupon applied, skip payment gateway redirect and approve immediately
+    // A zero-value subscription must never be represented as a Mercado Pago payment.
+    // Free/promotional entitlement issuance must be handled by a dedicated server-side entitlement flow.
     if (finalPrice === 0) {
-      return res.json({
-        immediateApproval: true,
-        preferenceId: `pref_free_${Date.now()}`,
-        init_point: null,
-        message: 'Suscripción bonificada al 100% por cupón promocional.',
-        paymentId: `MP-FREE-${Date.now().toString().slice(-6)}`,
-        status: 'approved',
+      return res.status(400).json({
+        error: 'El cupón bonificado requiere un flujo de activación promocional seguro y no genera una preferencia de pago.',
       });
     }
 
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN || 'TEST-82193810239102-073014-91823721389';
+    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+    if (!accessToken) {
+      return res.status(503).json({ error: 'Mercado Pago no está configurado en el servidor.' });
+    }
+
     const notificationUrl = `${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;
     const backUrl = `${req.protocol}://${req.get('host')}?payment_status=approved`;
 
@@ -1904,42 +1906,32 @@ app.post('/api/mercadopago/create-preference', async (req, res) => {
       },
       auto_return: 'approved',
       notification_url: notificationUrl,
-      external_reference: JSON.stringify({ userId, planId, planName, price: finalPrice }),
+      external_reference: JSON.stringify({ userId, planId, planName, price: finalPrice, coupon: appliedCoupon }),
     };
 
-    // If real access token configured, call official Mercado Pago REST API
-    if (process.env.MERCADOPAGO_ACCESS_TOKEN) {
-      const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(preferenceData),
-      });
+    const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(preferenceData),
+    });
 
-      const mpData = await mpResponse.json();
-      if (mpData.id) {
-        return res.json({
-          preferenceId: mpData.id,
-          init_point: mpData.init_point || mpData.sandbox_init_point,
-          finalPrice: `$${finalPrice.toLocaleString('es-AR')} ARS`,
-        });
-      }
+    const mpData = await mpResponse.json();
+    if (!mpResponse.ok || !mpData.id) {
+      console.error('Mercado Pago preference creation failed:', { status: mpResponse.status, response: mpData });
+      return res.status(502).json({ error: 'Mercado Pago no pudo crear una preferencia de pago.' });
     }
 
-    // Fallback sandbox preference for testing environments
-    const mockPrefId = `PREF-MP-${Date.now()}`;
     return res.json({
-      preferenceId: mockPrefId,
-      init_point: `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${mockPrefId}`,
-      sandbox_init_point: `https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=${mockPrefId}`,
+      preferenceId: mpData.id,
+      init_point: mpData.init_point || mpData.sandbox_init_point,
       finalPrice: `$${finalPrice.toLocaleString('es-AR')} ARS`,
-      message: 'Preferencia Mercado Pago generada correctamente.',
     });
   } catch (err: any) {
     console.error('Error in /api/mercadopago/create-preference:', err);
-    res.status(500).json({ error: 'Error al generar preferencia en Mercado Pago', details: err.message });
+    res.status(500).json({ error: 'Error al generar preferencia en Mercado Pago' });
   }
 });
 
