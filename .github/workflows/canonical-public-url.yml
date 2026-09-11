@@ -1,0 +1,76 @@
+name: Canonical Mercado Pago URL hardening
+
+on:
+  push:
+    branches:
+      - production-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch canonical public URL handling
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('server.ts')
+          text = p.read_text()
+
+          helper = '''\nfunction getPublicAppUrl(req: any): string {\n  const configured = String(process.env.PUBLIC_APP_URL || '').trim().replace(/\\/+$/, '');\n  if (configured) {\n    let parsed: URL;\n    try { parsed = new URL(configured); } catch { throw new Error('PUBLIC_APP_URL is invalid'); }\n    if (parsed.protocol !== 'https:') throw new Error('PUBLIC_APP_URL must use HTTPS');\n    return configured;\n  }\n  if (process.env.NODE_ENV === 'production') {\n    throw new Error('PUBLIC_APP_URL is required in production');\n  }\n  const host = req.get('host');\n  if (!host) throw new Error('Unable to determine development host');\n  return `${req.protocol}://${host}`;\n}\n'''
+
+          marker = "const PORT = Number(process.env.PORT) || 8080;"
+          if "function getPublicAppUrl(req: any)" not in text:
+              if marker not in text:
+                  raise SystemExit('PORT marker not found')
+              text = text.replace(marker, marker + helper, 1)
+
+          patterns = [
+              r"const (\\w+) = `\\$\\{req\\.protocol\\}://\\$\\{req\\.get\\(['\"]host['\"]\\)\\}`;",
+              r"const (\\w+) = `\\$\\{req\\.protocol\\}://\\$\\{req\\.get\\(\\\"host\\\"\\)\\}`;",
+          ]
+          replacements = 0
+          for pattern in patterns:
+              text, count = re.subn(pattern, lambda m: f"const {m.group(1)} = getPublicAppUrl(req);", text)
+              replacements += count
+
+          # Also replace the common inline form if present.
+          inline = re.compile(r"`\\$\\{req\\.protocol\\}://\\$\\{req\\.get\\(['\"]host['\"]\\)\\}`")
+          text, count = inline.subn("getPublicAppUrl(req)", text)
+          replacements += count
+
+          if replacements == 0:
+              raise SystemExit('No request-derived public URL construction found; refusing to make a no-op production patch')
+
+          p.write_text(text)
+          print(f'Replaced {replacements} request-derived public URL construction(s)')
+
+      - name: Verify no production request-derived payment URLs remain
+        run: |
+          ! grep -nE "req\\.protocol.*req\\.get\\(['\"]host['\"]\\)" server.ts
+          grep -n "getPublicAppUrl(req)" server.ts
+          grep -n "PUBLIC_APP_URL" server.ts
+
+      - name: Quality gate
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+
+      - name: Commit patch and remove temporary workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          git commit -m "fix: use canonical public URL for Mercado Pago callbacks"
+          git rm .github/workflows/canonical-public-url.yml
+          git commit -m "chore: remove temporary URL hardening workflow"
+          git push origin production-hardening
