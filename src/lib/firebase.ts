@@ -57,7 +57,10 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 // Initialize Firestore with custom databaseId if configured
-export const db = getFirestore(app, firebaseConfigData.firestoreDatabaseId || undefined);
+const databaseId = firebaseConfigData.firestoreDatabaseId;
+export const db = typeof databaseId === 'string' && databaseId.trim()
+  ? getFirestore(app, databaseId)
+  : getFirestore(app);
 
 // Initialize Storage
 let storageInstance: ReturnType<typeof getStorage> | null = null;
