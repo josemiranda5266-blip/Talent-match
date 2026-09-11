@@ -35,11 +35,47 @@ async function requireAdmin(req: any, res: any, next: any) {
   });
 }
 
+const aiUsage = new Map<string, { day: string; count: number }>();
+const FREE_AI_DAILY_LIMIT = 5;
+const PREMIUM_AI_DAILY_LIMIT = 100;
+
+function enforceAiBudget(req: any, res: any, next: any) {
+  const uid = String(req.user?.uid || '');
+  if (!uid) return res.status(401).json({ error: 'Usuario autenticado requerido.' });
+
+  const claims = req.user || {};
+  const isPremium = claims.isPremium === true || claims.premium === true || claims.plan === 'PRO' || claims.plan === 'PREMIUM';
+  const limit = isPremium ? PREMIUM_AI_DAILY_LIMIT : FREE_AI_DAILY_LIMIT;
+  const day = new Date().toISOString().slice(0, 10);
+  const current = aiUsage.get(uid);
+
+  if (!current || current.day !== day) {
+    aiUsage.set(uid, { day, count: 1 });
+    res.setHeader('X-AI-Daily-Limit', String(limit));
+    res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - 1)));
+    return next();
+  }
+
+  if (current.count >= limit) {
+    return res.status(429).json({
+      error: `Has alcanzado tu límite diario de ${limit} consultas con Inteligencia Artificial.`,
+      limit,
+      resetAt: `${day}T23:59:59.999Z`,
+    });
+  }
+
+  current.count += 1;
+  res.setHeader('X-AI-Daily-Limit', String(limit));
+  res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - current.count)));
+  return next();
+}
+
 const originalGet = express.application.get;
 const originalPost = express.application.post;
 const originalPut = express.application.put;
 const originalPatch = express.application.patch;
 const originalDelete = express.application.delete;
+const originalUse = express.application.use;
 
 function protectFinancialRoute(original: any) {
   return function protectedRoute(this: any, path: any, ...handlers: any[]) {
@@ -61,10 +97,20 @@ function protectFinancialRoute(original: any) {
   };
 }
 
+function protectAiMiddleware(original: any) {
+  return function protectedUse(this: any, path: any, ...handlers: any[]) {
+    if (path === '/api/ai/' && handlers.length > 0) {
+      return original.call(this, path, enforceAiBudget, ...handlers);
+    }
+    return original.call(this, path, ...handlers);
+  };
+}
+
 express.application.get = protectFinancialRoute(originalGet) as any;
 express.application.post = protectFinancialRoute(originalPost) as any;
 express.application.put = protectFinancialRoute(originalPut) as any;
 express.application.patch = protectFinancialRoute(originalPatch) as any;
 express.application.delete = protectFinancialRoute(originalDelete) as any;
+express.application.use = protectAiMiddleware(originalUse) as any;
 
 export {};
