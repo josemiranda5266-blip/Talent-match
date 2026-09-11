@@ -67,14 +67,19 @@ async function syncSource(definition: SourceDefinition) {
     const chunk = sourceSnapshot.docs.slice(offset, offset + BATCH_SIZE);
 
     for (const sourceDoc of chunk) {
+      const sourceData = sourceDoc.data();
       batch.set(
         db.collection(definition.target).doc(sourceDoc.id),
         {
-          ...sanitize(sourceDoc.data(), definition.fields),
-          published: true,
+          ...sanitize(sourceData, definition.fields),
+          // Keep the publication gate explicit so an unpublished source can
+          // never become visible merely because the sync job ran.
+          published: sourceData.published === false ? false : true,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
-        { merge: true },
+        // Full replacement prevents fields removed from the allowlist/source
+        // from lingering in an older public projection.
+        { merge: false },
       );
     }
 
