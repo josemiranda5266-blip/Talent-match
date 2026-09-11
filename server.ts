@@ -54,6 +54,8 @@ function boundedNumber(value: unknown, min: number, max: number): number | null 
 }
 
 const app = express();
+// Cloud Run terminates TLS at the proxy; trust the single managed proxy hop so req.protocol is HTTPS.
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 8080;
 app.use(express.json({ limit: '2mb' }));
 app.use((_req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'SAMEORIGIN'); res.setHeader('X-XSS-Protection', '1; mode=block'); next(); });
