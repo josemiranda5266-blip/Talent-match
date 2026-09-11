@@ -54,8 +54,16 @@ service cloud.firestore {
     match /applications/{applicationId} {
       allow get: if isAdmin() || (isAuthenticated() && (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
       allow list: if isAdmin();
-      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid && request.resource.data.clubId != request.auth.uid);
-      allow update: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid && request.resource.data.athleteId == resource.data.athleteId && request.resource.data.clubId == resource.data.clubId);
+      allow create: if isAdmin() || (isAuthenticated() &&
+        request.resource.data.athleteId == request.auth.uid &&
+        request.resource.data.clubId != request.auth.uid &&
+        exists(/databases/$(database)/documents/searches/$(request.resource.data.searchId)) &&
+        get(/databases/$(database)/documents/searches/$(request.resource.data.searchId)).data.clubId == request.resource.data.clubId);
+      allow update: if isAdmin() || (isAuthenticated() &&
+        resource.data.athleteId == request.auth.uid &&
+        request.resource.data.athleteId == resource.data.athleteId &&
+        request.resource.data.clubId == resource.data.clubId &&
+        request.resource.data.searchId == resource.data.searchId);
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid);
     }
 
