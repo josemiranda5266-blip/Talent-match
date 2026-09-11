@@ -265,7 +265,7 @@ export async function registerUser(
   const profileData: UserProfile = {
     uid: user.uid,
     email: user.email || email,
-    displayName: displayName || email.split('@')[0],
+    displayName: displayName || email.split('@')[0] || email,
     role: safeRole,
     phone,
     city,
@@ -1146,6 +1146,9 @@ export async function processReferralCodeApply(
     }
 
     const referrerDoc = snap.docs[0];
+    if (!referrerDoc) {
+      return { success: false, message: 'El código de referido no existe o venció.' };
+    }
     const referrerData = referrerDoc.data() as UserGrowthProfile;
 
     const newTotal = (referrerData.totalReferrals || 0) + 1;
