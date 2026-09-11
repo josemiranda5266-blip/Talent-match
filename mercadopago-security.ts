@@ -5,6 +5,35 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 const firebaseAuth = () => (admin as any).auth();
 const db = getFirestore();
 const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);
+const COUPON_DISCOUNTS = new Map<string, number>([
+  ['TALENT100', 100],
+  ['PROMO100', 100],
+  ['PROMO50', 50],
+  ['ARGENTINA50', 50],
+  ['PRO2025', 30],
+  ['CLUB30', 30],
+]);
+
+function calculateCouponPrice(basePrice: number, couponCode?: string | null): { finalPrice: number; coupon: string | null; discountPercent: number } {
+  const coupon = String(couponCode || '').trim().toUpperCase();
+  if (!coupon) return { finalPrice: basePrice, coupon: null, discountPercent: 0 };
+  const discountPercent = COUPON_DISCOUNTS.get(coupon);
+  if (discountPercent === undefined) throw new Error('UNAUTHORIZED_COUPON');
+  return { finalPrice: Math.max(0, Math.round(basePrice * (1 - discountPercent / 100))), coupon, discountPercent };
+}
+
+function resolveCanonicalBasePrice(finalPrice: number, couponCode?: string | null): number | null {
+  const coupon = String(couponCode || '').trim().toUpperCase();
+  if (!coupon) return ALLOWED_PLAN_PRICES_ARS.has(finalPrice) ? finalPrice : null;
+  for (const basePrice of ALLOWED_PLAN_PRICES_ARS) {
+    try {
+      if (calculateCouponPrice(basePrice, coupon).finalPrice === finalPrice) return basePrice;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 export async function requireFirebaseUser(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
@@ -87,7 +116,7 @@ export function enforceServerPrice(req: any, res: any, next: any) {
   req.body.userEmail = req.user.email || undefined;
   req.body.priceMonthly = price;
   if (coupon === 'PRUEBA100') return res.status(400).json({ error: 'Cupón no autorizado.' });
-  if (coupon && !['TALENT100', 'PROMO100', 'PROMO50', 'ARGENTINA50', 'PRO2025', 'CLUB30', 'TALENT20'].includes(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
+  if (coupon && !COUPON_DISCOUNTS.has(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
   return next();
 }
 
@@ -125,10 +154,14 @@ export async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: 
     const transactionAmount = Number(payment.transaction_amount);
     const referencedPrice = Number(reference.price);
     const expectedRequestedAmount = Number(req.body?.amount);
-    const expectedAmount = Number.isFinite(expectedRequestedAmount) && expectedRequestedAmount > 0 ? expectedRequestedAmount : referencedPrice;
     if (payment.status !== 'approved' || reference.userId !== req.user?.uid) return res.status(403).json({ error: 'El pago no está aprobado o no pertenece al usuario autenticado.' });
-    if (!ALLOWED_PLAN_PRICES_ARS.has(referencedPrice) || !ALLOWED_PLAN_PRICES_ARS.has(transactionAmount)) return res.status(403).json({ error: 'El importe del pago no corresponde a un plan autorizado.' });
-    if (transactionAmount !== referencedPrice || (Number.isFinite(expectedAmount) && expectedAmount > 0 && transactionAmount !== expectedAmount)) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe esperado.' });
+    const coupon = String(reference.coupon || '').trim().toUpperCase();
+    const canonicalBasePrice = resolveCanonicalBasePrice(referencedPrice, coupon);
+    if (canonicalBasePrice === null) return res.status(403).json({ error: 'El importe o cupón del pago no corresponde a un plan autorizado.' });
+    if (coupon === 'TALENT100' || coupon === 'PROMO100') return res.status(403).json({ error: 'El cupón bonificado no puede confirmarse mediante un pago.' });
+    const expectedFinalPrice = calculateCouponPrice(canonicalBasePrice, coupon).finalPrice;
+    if (transactionAmount !== expectedFinalPrice || referencedPrice !== expectedFinalPrice) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe autorizado.' });
+    if (Number.isFinite(expectedRequestedAmount) && expectedRequestedAmount > 0 && transactionAmount !== expectedRequestedAmount) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe esperado.' });
     if (reference.planId && req.body?.planId && String(reference.planId) !== String(req.body.planId)) return res.status(403).json({ error: 'El plan confirmado por Mercado Pago no coincide con la solicitud.' });
     req.body.paymentId = String(payment.id);
     req.body.amount = transactionAmount;
