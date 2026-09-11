@@ -2,14 +2,8 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(userId) { return isAuthenticated() && request.auth.uid == userId; }
     function isAdmin() {
       return isAuthenticated() && (
         request.auth.token.role == 'admin' ||
@@ -17,7 +11,6 @@ service cloud.firestore {
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
       );
     }
-
     function isConversationParticipant(conversationId) {
       return isAuthenticated() &&
         exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
@@ -34,28 +27,21 @@ service cloud.firestore {
         (isOwner(userId) &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.uid == resource.data.uid &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'isPremium',
-            'premium',
-            'plan'
-          ]));
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPremium', 'premium', 'plan']));
       allow delete: if isAdmin();
     }
 
     match /athletes/{athleteId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() &&
-          (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
+      allow get: if isAdmin() || (isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
       allow list: if isAdmin();
       allow create: if isAuthenticated() &&
         (request.resource.data.userId == request.auth.uid || athleteId == request.auth.uid);
-      allow update: if isAdmin() ||
-        (isAuthenticated() &&
-          (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
+      allow update: if isAdmin() || (isAuthenticated() &&
+        (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
       allow delete: if isAdmin();
     }
 
-    // Sanitized public athlete directory. Canonical athlete records remain private.
     match /publicAthletes/{athleteId} {
       allow get, list: if true;
       allow create, update, delete: if isAdmin();
@@ -64,43 +50,32 @@ service cloud.firestore {
     match /searches/{searchId} {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
-      allow create: if isAuthenticated() &&
-        (request.resource.data.clubId == request.auth.uid || isAdmin());
-      allow update: if isAdmin() ||
-        (isAuthenticated() && resource.data.clubId == request.auth.uid);
-      allow delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.clubId == request.auth.uid);
+      allow create: if isAuthenticated() && (request.resource.data.clubId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid);
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid);
     }
 
-    // Public read-only projections for directory/listing screens.
     match /publicSearches/{searchId} {
       allow get, list: if true;
       allow create, update, delete: if isAdmin();
     }
 
     match /applications/{applicationId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() &&
-          (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
+      allow get: if isAdmin() || (isAuthenticated() &&
+        (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
-      allow update: if isAdmin() ||
-        (isAuthenticated() &&
-          (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
-      allow delete: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
+      allow update: if isAdmin() || (isAuthenticated() &&
+        (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
+      allow delete: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
     }
 
     match /teams/{teamId} {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
-      allow create: if isAuthenticated() &&
-        (request.resource.data.ownerUserId == request.auth.uid || isAdmin());
-      allow update: if isAdmin() ||
-        (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
-      allow delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
+      allow create: if isAuthenticated() && (request.resource.data.ownerUserId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
     }
 
     match /publicTeams/{teamId} {
@@ -111,12 +86,9 @@ service cloud.firestore {
     match /tournaments/{tournamentId} {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
-      allow create: if isAuthenticated() &&
-        (request.resource.data.organizerUserId == request.auth.uid || isAdmin());
-      allow update: if isAdmin() ||
-        (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
-      allow delete: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.organizerUserId == request.auth.uid);
+      allow create: if isAuthenticated() && (request.resource.data.organizerUserId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
     }
 
     match /publicTournaments/{tournamentId} {
@@ -127,37 +99,27 @@ service cloud.firestore {
     match /conversations/{conversationId} {
       allow get: if isAdmin() || isConversationParticipant(conversationId);
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.auth.uid in request.resource.data.participants);
+      allow create: if isAdmin() || (isAuthenticated() && request.auth.uid in request.resource.data.participants);
       allow update: if isAdmin() || isConversationParticipant(conversationId);
       allow delete: if isAdmin();
-
       match /messages/{messageId} {
         allow get, list: if isAdmin() || isConversationParticipant(conversationId);
-        allow create: if isAdmin() ||
-          (isConversationParticipant(conversationId) &&
-            request.resource.data.senderId == request.auth.uid);
-        allow update, delete: if isAdmin() ||
-          (isConversationParticipant(conversationId) &&
-            resource.data.senderId == request.auth.uid);
+        allow create: if isAdmin() || (isConversationParticipant(conversationId) && request.resource.data.senderId == request.auth.uid);
+        allow update, delete: if isAdmin() || (isConversationParticipant(conversationId) && resource.data.senderId == request.auth.uid);
       }
     }
 
     match /notifications/{notificationId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAdmin();
-      allow update, delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
     }
 
     match /userReviews/{reviewId} {
       allow get, list: if true;
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
-      allow update, delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.authorUserId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid);
     }
 
     match /verifiedReferences/{referenceId} {
@@ -167,65 +129,47 @@ service cloud.firestore {
 
     match /careerTimelines/{timelineId} {
       allow get, list: if true;
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
-      allow update, delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
 
     match /verifications/{verificationId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     match /verificationRequests/{requestId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     match /reports/{reportId} {
       allow get, list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     match /userReports/{reportId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() && resource.data.reporterUserId == request.auth.uid);
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.reporterUserId == request.auth.uid);
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
-    match /fraudAlerts/{alertId} {
-      allow read, write: if isAdmin();
-    }
-
-    match /moderationAuditLogs/{logId} {
-      allow read, write: if isAdmin();
-    }
+    match /fraudAlerts/{alertId} { allow read, write: if isAdmin(); }
+    match /moderationAuditLogs/{logId} { allow read, write: if isAdmin(); }
 
     match /accountAppeals/{appealId} {
-      allow get: if isAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow list: if isAdmin();
-      allow create: if isAdmin() ||
-        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
-    match /{document=**} {
-      allow read, write: if false;
-    }
+    match /{document=**} { allow read, write: if false; }
   }
 }
