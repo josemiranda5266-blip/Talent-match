@@ -5,7 +5,7 @@ import express from 'express';
 const firebaseAuth = () => (admin as any).auth();
 const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);
 
-async function requireFirebaseUser(req: any, res: any, next: any) {
+export async function requireFirebaseUser(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token de autenticación requerido.' });
   try {
@@ -27,7 +27,7 @@ function constantTimeHexEqual(expectedHex: string, receivedHex: string): boolean
   return expected.length === received.length && crypto.timingSafeEqual(expected, received);
 }
 
-async function verifyMercadoPagoWebhook(req: any, res: any, next: any) {
+export async function verifyMercadoPagoWebhook(req: any, res: any, next: any) {
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
   const signature = String(req.headers['x-signature'] || '');
   const requestId = String(req.headers['x-request-id'] || '');
@@ -52,7 +52,7 @@ async function verifyMercadoPagoWebhook(req: any, res: any, next: any) {
   return next();
 }
 
-async function recordWebhookIdempotency(req: any, res: any, next: any) {
+export async function recordWebhookIdempotency(req: any, res: any, next: any) {
   const eventId = String(req.body?.id || `${req.body?.type || 'unknown'}:${req.body?.action || 'unknown'}:${req.body?.data?.id || 'unknown'}`);
   const ref = admin.firestore().collection('mercadopagoWebhookEvents').doc(crypto.createHash('sha256').update(eventId).digest('hex'));
   try {
@@ -70,12 +70,12 @@ async function recordWebhookIdempotency(req: any, res: any, next: any) {
   }
 }
 
-async function requireMercadoPagoCredential(_req: any, res: any, next: any) {
+export async function requireMercadoPagoCredential(_req: any, res: any, next: any) {
   if (!process.env.MERCADOPAGO_ACCESS_TOKEN) return res.status(503).json({ error: 'Mercado Pago no está configurado en el servidor.' });
   return next();
 }
 
-function enforceServerPrice(req: any, res: any, next: any) {
+export function enforceServerPrice(req: any, res: any, next: any) {
   const price = Number(String(req.body?.priceMonthly ?? '').replace(/[^0-9.]/g, ''));
   const coupon = String(req.body?.couponCode || '').trim().toUpperCase();
   if (!Number.isFinite(price) || !ALLOWED_PLAN_PRICES_ARS.has(price)) return res.status(400).json({ error: 'Plan o precio no autorizado por el servidor.' });
@@ -87,7 +87,7 @@ function enforceServerPrice(req: any, res: any, next: any) {
   return next();
 }
 
-function rejectSimulatedPreferenceResponse(req: any, res: any, next: any) {
+export function rejectSimulatedPreferenceResponse(req: any, res: any, next: any) {
   const originalJson = res.json.bind(res);
   res.json = (payload: any) => {
     const preferenceId = String(payload?.preferenceId || '');
@@ -108,7 +108,7 @@ function rejectSimulatedPreferenceResponse(req: any, res: any, next: any) {
   return next();
 }
 
-async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
+export async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
   const paymentId = String(req.body?.paymentId || '').trim();
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken || !paymentId) return res.status(400).json({ error: 'No es posible verificar el pago sin credenciales y paymentId.' });
@@ -148,7 +148,7 @@ async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
   }
 }
 
-async function rejectUnimplementedCancellation(_req: any, res: any, _next: any) {
+export async function rejectUnimplementedCancellation(_req: any, res: any, _next: any) {
   return res.status(501).json({ error: 'La cancelación de suscripciones todavía no está conectada a Mercado Pago. No se informa una cancelación hasta que exista confirmación real del proveedor.' });
 }
 
@@ -167,5 +167,3 @@ function protectMercadoPagoRoute(original: any) {
 
 const originalPost = express.application.post;
 express.application.post = protectMercadoPagoRoute(originalPost) as any;
-
-export {};
