@@ -1,0 +1,53 @@
+name: Patch Cloud Run readiness
+
+on:
+  push:
+    branches:
+      - production-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+          fetch-depth: 0
+
+      - name: Patch health endpoint and add runbook
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('server.ts')
+          text = path.read_text()
+          marker = "app.use('/api/', generalLimiter);"
+          health = "app.get('/api/health', (_req, res) => res.status(200).json({ status: 'ok', service: 'talent-match', timestamp: new Date().toISOString() }));\n"
+          if "app.get('/api/health'" not in text:
+              if marker not in text:
+                  raise SystemExit('Health endpoint insertion marker not found')
+              text = text.replace(marker, health + marker, 1)
+              path.write_text(text)
+
+          doc = Path('docs/CLOUD_RUN_PRODUCTION.md')
+          doc.parent.mkdir(parents=True, exist_ok=True)
+          doc.write_text('''# TalentMatch — producción en Google Cloud Run\n\nEsta guía deja preparada la rama `production-hardening` para un despliegue real sin almacenar credenciales en el repositorio.\n\n## 1. Arquitectura de producción\n\n- Runtime: Google Cloud Run.\n- Puerto: Cloud Run proporciona `PORT`; el servidor usa `process.env.PORT` y escucha en `0.0.0.0`.\n- Firebase Admin: Application Default Credentials del service account de Cloud Run. No se necesita subir un JSON de service account al repositorio.\n- Frontend: el contenedor sirve `dist/` en modo producción.\n- Health check: `GET /api/health`.\n\n## 2. Secretos\n\nCrear en Google Secret Manager y exponer al servicio de Cloud Run como variables de entorno:\n\n- `MERCADOPAGO_ACCESS_TOKEN`\n- `MERCADOPAGO_WEBHOOK_SECRET`\n- `GEMINI_API_KEY`\n- `ADMIN_MASTER_SECRET` si se utiliza el endpoint administrativo correspondiente.\n\nNo colocar valores reales de estos secretos en GitHub, Dockerfile, `.env` versionado ni en esta documentación.\n\n## 3. Service account\n\nEl service account utilizado por Cloud Run debe disponer únicamente de los permisos necesarios para:\n\n- Firestore/Cloud Firestore (lectura y escritura de las colecciones operativas de la aplicación).\n- Firebase Storage si la aplicación realiza operaciones administrativas de archivos.\n- Acceso de lectura a los secretos de Secret Manager utilizados por el servicio.\n\nEvitar usar una cuenta con permisos de propietario del proyecto.\n\n## 4. Variables no secretas\n\nConfigurar como mínimo:\n\n```text\nNODE_ENV=production\n```\n\nNo fijar manualmente `PORT`: Cloud Run lo inyecta.\n\n## 5. Health check\n\nDespués del despliegue comprobar:\n\n```text\nGET https://<cloud-run-service-url>/api/health\n```\n\nDebe devolver HTTP 200 y un JSON con `status: "ok"`.\n\nEl endpoint no consulta Firestore ni Gemini, por lo que sirve como comprobación básica de disponibilidad del proceso.\n\n## 6. Mercado Pago\n\nEl webhook de producción debe apuntar a:\n\n```text\nhttps://<cloud-run-service-url>/api/mercadopago/webhook\n```\n\nMantener configurados `MERCADOPAGO_WEBHOOK_SECRET` y `MERCADOPAGO_ACCESS_TOKEN`. El backend valida la firma del webhook y verifica los pagos contra la API real de Mercado Pago.\n\n## 7. Gemini\n\n`GEMINI_API_KEY` es obligatoria para las rutas de IA. Si falta, las rutas protegidas deben responder con estado de servicio no disponible en lugar de simular una respuesta de IA.\n\n## 8. Despliegue seguro\n\n1. Construir la imagen con el Dockerfile del repositorio.\n2. Publicarla en Artifact Registry.\n3. Crear/actualizar el servicio Cloud Run usando la imagen.\n4. Inyectar secretos desde Secret Manager.\n5. Asignar el service account mínimo necesario.\n6. Verificar `/api/health`.\n7. Verificar autenticación Firebase y una operación de lectura no sensible.\n8. Verificar Mercado Pago únicamente con credenciales reales y una transacción controlada.\n\nNo ejecutar una migración de datos ni cambiar reglas de Firestore como parte del primer despliegue sin una copia/plan de rollback.\n\n## 9. Estado de calidad conocido\n\nEl build de producción es actualmente el gate de CI. El typecheck estricto continúa siendo **advisory** debido a deuda de tipos existente en la UI y servicios legacy; no debe interpretarse como typecheck limpio.\n\nAntes de convertir el typecheck en gate obligatorio, deben corregirse los errores tipados ya identificados en componentes de UI, tipos de usuario/atleta, iconos Lucide, Firebase y servicios legacy.\n''')
+          PY
+
+      - name: Commit changes and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts docs/CLOUD_RUN_PRODUCTION.md .github/workflows/patch-cloud-run-readiness.yml
+          git rm .github/workflows/patch-cloud-run-readiness.yml
+          git commit -m "chore: finalize Cloud Run readiness [skip ci]"
+          git push origin production-hardening
