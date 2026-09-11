@@ -1,0 +1,103 @@
+name: Harden Mercado Pago coupons
+
+on:
+  push:
+    branches:
+      - production-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor == 'josemiranda5266-blip'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Mercado Pago coupon integrity
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('mercadopago-security.ts')
+          s = p.read_text()
+          s = s.replace(
+              "const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);",
+              """const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);
+          const COUPON_DISCOUNTS = new Map<string, number>([
+            ['TALENT100', 100], ['PROMO100', 100], ['PROMO50', 50], ['ARGENTINA50', 50],
+            ['PRO2025', 30], ['CLUB30', 30], ['TALENT20', 20],
+          ]);
+
+          function calculateCouponPrice(basePrice: number, couponCode?: string | null): { finalPrice: number; coupon: string | null; discountPercent: number } {
+            const coupon = String(couponCode || '').trim().toUpperCase();
+            if (!coupon) return { finalPrice: basePrice, coupon: null, discountPercent: 0 };
+            const discountPercent = COUPON_DISCOUNTS.get(coupon);
+            if (discountPercent === undefined) throw new Error('UNAUTHORIZED_COUPON');
+            return { finalPrice: Math.max(0, Math.round(basePrice * (1 - discountPercent / 100))), coupon, discountPercent };
+          }"""
+          )
+
+          old = """  req.body.userId = req.user.uid;
+  req.body.userEmail = req.user.email || undefined;
+  req.body.priceMonthly = price;
+  if (coupon === 'PRUEBA100') return res.status(400).json({ error: 'Cupón no autorizado.' });
+  if (coupon && !['TALENT100', 'PROMO100', 'PROMO50', 'ARGENTINA50', 'PRO2025', 'CLUB30', 'TALENT20'].includes(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
+  return next();"""
+          new = """  req.body.userId = req.user.uid;
+  req.body.userEmail = req.user.email || undefined;
+  try {
+    const pricing = calculateCouponPrice(price, coupon);
+    if (pricing.finalPrice <= 0) return res.status(400).json({ error: 'El cupón bonificado no puede crear una preferencia de pago.' });
+    req.body.priceMonthly = price;
+    req.body.serverBasePrice = price;
+    req.body.serverFinalPrice = pricing.finalPrice;
+    req.body.serverCoupon = pricing.coupon;
+    req.body.serverDiscountPercent = pricing.discountPercent;
+  } catch (error) {
+    if ((error as Error).message === 'UNAUTHORIZED_COUPON') return res.status(400).json({ error: 'Cupón no autorizado.' });
+    return res.status(400).json({ error: 'Precio o cupón no válido.' });
+  }
+  return next();"""
+          if old not in s:
+              raise SystemExit('enforceServerPrice block not found')
+          s = s.replace(old, new)
+
+          old = """    const expectedRequestedAmount = Number(req.body?.amount);
+    const expectedAmount = Number.isFinite(expectedRequestedAmount) && expectedRequestedAmount > 0 ? expectedRequestedAmount : referencedPrice;
+    if (payment.status !== 'approved' || reference.userId !== req.user?.uid) return res.status(403).json({ error: 'El pago no está aprobado o no pertenece al usuario autenticado.' });
+    if (!ALLOWED_PLAN_PRICES_ARS.has(referencedPrice) || !ALLOWED_PLAN_PRICES_ARS.has(transactionAmount)) return res.status(403).json({ error: 'El importe del pago no corresponde a un plan autorizado.' });
+    if (transactionAmount !== referencedPrice || (Number.isFinite(expectedAmount) && expectedAmount > 0 && transactionAmount !== expectedAmount)) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe esperado.' });"""
+          new = """    const basePrice = Number(reference.basePrice || referencedPrice);
+    const coupon = String(reference.coupon || '').trim().toUpperCase() || null;
+    const expectedRequestedAmount = Number(req.body?.amount);
+    if (payment.status !== 'approved' || reference.userId !== req.user?.uid) return res.status(403).json({ error: 'El pago no está aprobado o no pertenece al usuario autenticado.' });
+    if (!ALLOWED_PLAN_PRICES_ARS.has(basePrice)) return res.status(403).json({ error: 'El plan base del pago no está autorizado.' });
+    let calculatedFinalPrice: number;
+    try { calculatedFinalPrice = calculateCouponPrice(basePrice, coupon).finalPrice; }
+    catch { return res.status(403).json({ error: 'El cupón asociado al pago no está autorizado.' }); }
+    if (calculatedFinalPrice <= 0 || referencedPrice !== calculatedFinalPrice || transactionAmount !== calculatedFinalPrice) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el precio autorizado.' });
+    if (Number.isFinite(expectedRequestedAmount) && expectedRequestedAmount > 0 && transactionAmount !== expectedRequestedAmount) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe esperado.' });"""
+          if old not in s:
+              raise SystemExit('verification block not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          p = Path('server.ts')
+          s = p.read_text()
+          old = """app.post('/api/mercadopago/create-preference',async(req,res)=>{try{const{planId,planName,priceMonthly,userEmail,userId,couponCode}=req.body;const numericPrice=parseFloat(String(priceMonthly).replace(/[^0-9.]/g,''))||14900;let finalPrice=numericPrice;let appliedCoupon=null;if(couponCode){const c=String(couponCode).trim().toUpperCase();if(['TALENT100','PROMO100','PRUEBA100'].includes(c)){finalPrice=0;appliedCoupon=c;}else if(['PROMO50','ARGENTINA50'].includes(c)){finalPrice=Math.round(numericPrice*.5);appliedCoupon=c;}else if(['PRO2025','CLUB30'].includes(c)){finalPrice=Math.round(numericPrice*.7);appliedCoupon=c;}}if(finalPrice===0)return res.status(400).json({error:'El cupón bonificado requiere un flujo de activación promocional seguro y no genera una preferencia de pago.'});const accessToken=process.env.MERCADOPAGO_ACCESS_TOKEN;if(!accessToken)return res.status(503).json({error:'Mercado Pago no está configurado en el servidor.'});const notificationUrl=`${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;const backUrl=`${req.protocol}://${req.get('host')}?payment_status=approved`;const preferenceData={items:[{id:planId||'plan-pro',title:`TalentMatch - Suscripción ${planName||'PRO'}`,description:`Acceso Premium TalentMatch Argentina por 30 días (${userEmail||'usuario'})`,quantity:1,currency_id:'ARS',unit_price:finalPrice}],payer:{email:userEmail||'comprador@talentmatch.com.ar'},back_urls:{success:backUrl,pending:backUrl,failure:`${req.protocol}://${req.get('host')}?payment_status=failure`},auto_return:'approved',notification_url:notificationUrl,external_reference:JSON.stringify({userId,planId,planName,price:finalPrice,coupon:appliedCoupon})};const mpResponse=await fetch('https://api.mercadopago.com/checkout/preferences',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify(preferenceData)});const mpData=await mpResponse.json();if(!mpResponse.ok||!mpData.id)return res.status(502).json({error:'Mercado Pago no pudo crear una preferencia de pago.'});return res.json({preferenceId:mpData.id,init_point:mpData.init_point||mpData.sandbox_init_point,finalPrice:`$${finalPrice.toLocaleString('es-AR')} ARS`});}catch(err:any){console.error('Error in /api/mercadopago/create-preference:',err);return res.status(500).json({error:'Error al generar preferencia en Mercado Pago'});}});"""
+          new = """app.post('/api/mercadopago/create-preference',async(req,res)=>{try{const{planId,planName,userEmail,userId}=req.body;const numericPrice=Number(req.body?.serverBasePrice);const finalPrice=Number(req.body?.serverFinalPrice);const appliedCoupon=req.body?.serverCoupon||null;if(!Number.isFinite(numericPrice)||!Number.isFinite(finalPrice)||finalPrice<=0)return res.status(400).json({error:'Precio final no autorizado por el servidor.'});const accessToken=process.env.MERCADOPAGO_ACCESS_TOKEN;if(!accessToken)return res.status(503).json({error:'Mercado Pago no está configurado en el servidor.'});const publicAppUrl=String(process.env.PUBLIC_APP_URL||'').trim().replace(/\\/$/,'');if(!publicAppUrl)return res.status(503).json({error:'PUBLIC_APP_URL no está configurado en el servidor.'});const notificationUrl=`${publicAppUrl}/api/mercadopago/webhook`;const backUrl=`${publicAppUrl}?payment_status=approved`;const preferenceData={items:[{id:planId||'plan-pro',title:`TalentMatch - Suscripción ${planName||'PRO'}`,description:`Acceso Premium TalentMatch Argentina por 30 días`,quantity:1,currency_id:'ARS',unit_price:finalPrice}],payer:{email:userEmail||'comprador@talentmatch.com.ar'},back_urls:{success:backUrl,pending:backUrl,failure:`${publicAppUrl}?payment_status=failure`},auto_return:'approved',notification_url:notificationUrl,external_reference:JSON.stringify({userId,planId,planName,basePrice:numericPrice,price:finalPrice,coupon:appliedCoupon})};const mpResponse=await fetch('https://api.mercadopago.com/checkout/preferences',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify(preferenceData)});const mpData=await mpResponse.json();if(!mpResponse.ok||!mpData.id)return res.status(502).json({error:'Mercado Pago no pudo crear una preferencia de pago.'});return res.json({preferenceId:mpData.id,init_point:mpData.init_point||mpData.sandbox_init_point,finalPrice:`$${finalPrice.toLocaleString('es-AR')} ARS`});}catch(err:any){console.error('Error in /api/mercadopago/create-preference:',err);return res.status(500).json({error:'Error al generar preferencia en Mercado Pago'});}});"""
+          if old not in s:
+              raise SystemExit('create-preference route not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/harden-mp-coupons.yml
+          git add mercadopago-security.ts server.ts .github/workflows/harden-mp-coupons.yml
+          git commit -m "fix(payments): bind coupons to server-calculated price" || exit 0
+          git push origin production-hardening
