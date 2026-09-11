@@ -28,6 +28,5 @@ jobs:
       - name: Production build
         run: bun run build
 
-      - name: Typecheck (advisory)
-        continue-on-error: true
+      - name: Typecheck
         run: bun run typecheck
