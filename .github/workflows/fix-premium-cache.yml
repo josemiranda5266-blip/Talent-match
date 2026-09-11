@@ -1,0 +1,60 @@
+name: Fix Premium Cache
+on:
+  push:
+    branches:
+      - production-hardening
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore(ci): apply premium cache invalidation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+      - name: Apply cache invalidation wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('mercadopago-security.ts')
+          s = p.read_text()
+          if 'export { invalidatePremiumEntitlement }' not in s:
+              s += "\nexport { invalidatePremiumEntitlement } from './runtime-security.ts';\n"
+          p.write_text(s)
+
+          p = Path('server.ts')
+          s = p.read_text()
+          old = "import { requireAuthenticated, requireAdmin, enforceAiBudget, sanitizeAiErrorResponse, markFinancialDataAsModelled, markAnalyticsDataAsModelled } from './runtime-security.ts';"
+          new = "import { requireAuthenticated, requireAdmin, enforceAiBudget, sanitizeAiErrorResponse, markFinancialDataAsModelled, markAnalyticsDataAsModelled, invalidatePremiumEntitlement } from './runtime-security.ts';"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif 'invalidatePremiumEntitlement' not in s.split('\n', 12)[7]:
+              raise SystemExit('runtime-security import target not found')
+
+          old = "    const eventRef=req.mercadoPagoWebhookEventRef;\n    if(eventRef)await eventRef.set({processedAt:FieldValue.serverTimestamp(),paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount},{merge:true});"
+          new = "    invalidatePremiumEntitlement(uid);\n    const eventRef=req.mercadoPagoWebhookEventRef;\n    if(eventRef)await eventRef.set({processedAt:FieldValue.serverTimestamp(),paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount},{merge:true});"
+          if old not in s:
+              raise SystemExit('webhook entitlement target not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts mercadopago-security.ts
+          git diff --cached --check
+          git commit -m 'chore(ci): apply premium cache invalidation'
+          git push origin production-hardening
+      - name: Remove one-shot workflow
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin production-hardening
+          git checkout production-hardening
+          rm -f .github/workflows/fix-premium-cache.yml
+          git add -u .github/workflows/fix-premium-cache.yml
+          git commit -m 'chore(ci): remove premium cache patcher'
+          git push origin production-hardening
