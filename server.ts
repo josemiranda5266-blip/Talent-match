@@ -43,7 +43,7 @@ async function getAuthoritativeCandidates(candidates: any[]): Promise<any[]> {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 8080;
 app.use(express.json({ limit: '2mb' }));
 app.use((_req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('X-Frame-Options', 'SAMEORIGIN'); res.setHeader('X-XSS-Protection', '1; mode=block'); next(); });
 
