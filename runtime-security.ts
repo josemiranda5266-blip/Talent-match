@@ -27,6 +27,14 @@ async function requireAuthenticated(req: any, res: any, next: any) {
   }
 }
 
+async function requireAdmin(req: any, res: any, next: any) {
+  await requireAuthenticated(req, res, async () => {
+    const claims = req.user || {};
+    if (claims.admin === true || claims.role === 'admin') return next();
+    return res.status(403).json({ error: 'Se requieren permisos administrativos.' });
+  });
+}
+
 const originalGet = express.application.get;
 const originalPost = express.application.post;
 const originalPut = express.application.put;
@@ -36,8 +44,19 @@ const originalDelete = express.application.delete;
 function protectFinancialRoute(original: any) {
   return function protectedRoute(this: any, path: any, ...handlers: any[]) {
     if (typeof path === 'string' && path.startsWith('/api/financial/')) {
-      return original.call(this, path, requireAuthenticated, ...handlers);
+      const adminOnly = new Set([
+        '/api/financial/summary',
+        '/api/financial/reserve-config',
+        '/api/financial/executive-report',
+      ]);
+      const middleware = adminOnly.has(path) ? requireAdmin : requireAuthenticated;
+      return original.call(this, path, middleware, ...handlers);
     }
+
+    if (typeof path === 'string' && path.startsWith('/api/admin/')) {
+      return original.call(this, path, requireAdmin, ...handlers);
+    }
+
     return original.call(this, path, ...handlers);
   };
 }
