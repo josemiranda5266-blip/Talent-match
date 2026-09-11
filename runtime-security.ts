@@ -1,5 +1,4 @@
 import * as admin from 'firebase-admin';
-import express from 'express';
 
 if (!(admin as any).apps?.length) {
   try {
@@ -11,10 +10,7 @@ if (!(admin as any).apps?.length) {
 
 export async function requireAuthenticated(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Token de autenticación requerido.' });
-  }
-
+  if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token de autenticación requerido.' });
   try {
     const token = authHeader.slice('Bearer '.length).trim();
     if (!token) return res.status(401).json({ error: 'Token de autenticación requerido.' });
@@ -42,7 +38,6 @@ const ENTITLEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 async function resolvePremiumEntitlement(uid: string): Promise<boolean> {
   const cached = entitlementCache.get(uid);
   if (cached && cached.expiresAt > Date.now()) return cached.isPremium;
-
   try {
     const snapshot = await (admin as any).firestore().collection('users').doc(uid).get();
     const data = snapshot.exists ? snapshot.data() || {} : {};
@@ -60,22 +55,12 @@ async function resolvePremiumEntitlement(uid: string): Promise<boolean> {
 async function reserveDailyAiQuota(uid: string, day: string, limit: number): Promise<number> {
   const db = (admin as any).firestore();
   const quotaRef = db.collection('aiUsageDaily').doc(`${uid}_${day}`);
-
   return db.runTransaction(async (transaction: any) => {
     const snapshot = await transaction.get(quotaRef);
     const currentCount = snapshot.exists ? Number(snapshot.data()?.count || 0) : 0;
-
     if (currentCount >= limit) return -1;
-
     const nextCount = currentCount + 1;
-    transaction.set(quotaRef, {
-      uid,
-      day,
-      count: nextCount,
-      limit,
-      updatedAt: (admin as any).firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-
+    transaction.set(quotaRef, { uid, day, count: nextCount, limit, updatedAt: (admin as any).firestore.FieldValue.serverTimestamp() }, { merge: true });
     return nextCount;
   });
 }
@@ -83,21 +68,12 @@ async function reserveDailyAiQuota(uid: string, day: string, limit: number): Pro
 export async function enforceAiBudget(req: any, res: any, next: any) {
   const uid = String(req.user?.uid || '');
   if (!uid) return res.status(401).json({ error: 'Usuario autenticado requerido.' });
-
   const isPremium = await resolvePremiumEntitlement(uid);
   const limit = isPremium ? PREMIUM_AI_DAILY_LIMIT : FREE_AI_DAILY_LIMIT;
   const day = new Date().toISOString().slice(0, 10);
-
   try {
     const count = await reserveDailyAiQuota(uid, day, limit);
-    if (count < 0) {
-      return res.status(429).json({
-        error: `Has alcanzado tu límite diario de ${limit} consultas con Inteligencia Artificial.`,
-        limit,
-        resetAt: `${day}T23:59:59.999Z`,
-      });
-    }
-
+    if (count < 0) return res.status(429).json({ error: `Has alcanzado tu límite diario de ${limit} consultas con Inteligencia Artificial.`, limit, resetAt: `${day}T23:59:59.999Z` });
     res.setHeader('X-AI-Daily-Limit', String(limit));
     res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - count)));
     return next();
@@ -107,12 +83,9 @@ export async function enforceAiBudget(req: any, res: any, next: any) {
   }
 }
 
-function requirePaymentAuthentication(req: any, res: any, next: any) {
+export function requirePaymentAuthentication(req: any, res: any, next: any) {
   return requireAuthenticated(req, res, () => {
-    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
-      return res.status(503).json({ error: 'Mercado Pago no está configurado para operar en este entorno.' });
-    }
-
+    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) return res.status(503).json({ error: 'Mercado Pago no está configurado para operar en este entorno.' });
     if (!req.body || typeof req.body !== 'object') req.body = {};
     req.body.userId = req.user.uid;
     if (req.user.email) req.body.userEmail = req.user.email;
@@ -120,7 +93,7 @@ function requirePaymentAuthentication(req: any, res: any, next: any) {
   });
 }
 
-function markFinancialDataAsModelled(_req: any, res: any, next: any) {
+export function markFinancialDataAsModelled(_req: any, res: any, next: any) {
   const originalJson = res.json.bind(res);
   res.json = (body: any) => {
     if (body && typeof body === 'object' && !Array.isArray(body)) {
@@ -135,59 +108,3 @@ function markFinancialDataAsModelled(_req: any, res: any, next: any) {
   };
   return next();
 }
-
-// Compatibility guard: sensitive routes are protected at registration time until
-// every route consumes the exported middleware directly.
-const originalGet = express.application.get;
-const originalPost = express.application.post;
-const originalPut = express.application.put;
-const originalPatch = express.application.patch;
-const originalDelete = express.application.delete;
-const originalUse = express.application.use;
-
-function protectSensitiveRoute(original: any) {
-  return function protectedRoute(this: any, path: any, ...handlers: any[]) {
-    if (typeof path === 'string' && path.startsWith('/api/financial/')) {
-      const adminOnly = new Set([
-        '/api/financial/summary',
-        '/api/financial/reserve-config',
-        '/api/financial/executive-report',
-      ]);
-      return original.call(this, path, adminOnly.has(path) ? requireAdmin : requireAuthenticated, markFinancialDataAsModelled, ...handlers);
-    }
-
-    if (typeof path === 'string' && path.startsWith('/api/admin/')) {
-      return original.call(this, path, requireAdmin, ...handlers);
-    }
-
-    if (typeof path === 'string' && path.startsWith('/api/mercadopago/')) {
-      const protectedPaymentRoutes = new Set([
-        '/api/mercadopago/create-preference',
-        '/api/mercadopago/verify-payment',
-        '/api/mercadopago/cancel-subscription',
-      ]);
-      if (protectedPaymentRoutes.has(path)) {
-        return original.call(this, path, requirePaymentAuthentication, ...handlers);
-      }
-    }
-
-    return original.call(this, path, ...handlers);
-  };
-}
-
-function protectAiMiddleware(original: any) {
-  return function protectedUse(this: any, path: any, ...handlers: any[]) {
-    if (path === '/api/ai/' && handlers.length > 0) {
-      if (handlers.length === 1) return original.call(this, path, handlers[0], enforceAiBudget);
-      return original.call(this, path, handlers[0], enforceAiBudget, ...handlers.slice(1));
-    }
-    return original.call(this, path, ...handlers);
-  };
-}
-
-express.application.get = protectSensitiveRoute(originalGet) as any;
-express.application.post = protectSensitiveRoute(originalPost) as any;
-express.application.put = protectSensitiveRoute(originalPut) as any;
-express.application.patch = protectSensitiveRoute(originalPatch) as any;
-express.application.delete = protectSensitiveRoute(originalDelete) as any;
-express.application.use = protectAiMiddleware(originalUse) as any;
