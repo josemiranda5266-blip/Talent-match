@@ -27,8 +27,8 @@ service cloud.firestore {
         request.resource.data.uid == resource.data.uid &&
         request.resource.data.role == resource.data.role &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'isPremium', 'premium', 'plan', 'premiumExpiresAt', 'subscriptionPlanId',
-          'premiumActivatedAt', 'premiumPaymentId', 'premiumAmountArs', 'premiumCoupon', 'premiumSource'
+          'isPremium', 'premium', 'plan', 'premiumExpiresAt', 'subscriptionPlanId', 'premiumActivatedAt',
+          'premiumPaymentId', 'premiumAmountArs', 'premiumCoupon', 'premiumSource'
         ]));
       allow delete: if isAdmin();
     }
@@ -123,21 +123,33 @@ service cloud.firestore {
       allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.recipientUserId == request.auth.uid && request.resource.data.recipientUserId == resource.data.recipientUserId);
     }
 
+    // Legacy trust-data collections are private until dedicated public projections exist.
     match /userReviews/{reviewId} {
-      allow get, list: if true;
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid);
+      allow list: if isAdmin();
       allow create: if isAdmin() || (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
       allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid && request.resource.data.authorUserId == resource.data.authorUserId);
     }
 
     match /verifiedReferences/{referenceId} {
-      allow get, list: if true;
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.targetUserId == request.auth.uid);
+      allow list: if isAdmin();
       allow create, update, delete: if isAdmin();
     }
 
     match /careerTimelines/{timelineId} {
-      allow get, list: if true;
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow list: if isAdmin();
       allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
+    }
+
+    // Current review service uses /reviews. Reads require authentication because documents
+    // contain authorUserId; anonymous/public field-level access is deferred to a projection.
+    match /reviews/{reviewId} {
+      allow get, list: if isAdmin() || isAuthenticated();
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid && request.resource.data.authorUserId == resource.data.authorUserId);
     }
 
     match /verifications/{verificationId} {
