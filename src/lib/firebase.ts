@@ -33,13 +33,21 @@ import {
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
+const requireFirebaseConfigValue = (key: keyof typeof firebaseConfigData): string => {
+  const value = firebaseConfigData[key];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Firebase configuration is missing required field: ${String(key)}`);
+  }
+  return value;
+};
+
 const firebaseConfig = {
-  apiKey: firebaseConfigData.apiKey,
-  authDomain: firebaseConfigData.authDomain,
-  projectId: firebaseConfigData.projectId,
-  storageBucket: firebaseConfigData.storageBucket,
-  messagingSenderId: firebaseConfigData.messagingSenderId,
-  appId: firebaseConfigData.appId,
+  apiKey: requireFirebaseConfigValue('apiKey'),
+  authDomain: requireFirebaseConfigValue('authDomain'),
+  projectId: requireFirebaseConfigValue('projectId'),
+  storageBucket: requireFirebaseConfigValue('storageBucket'),
+  messagingSenderId: requireFirebaseConfigValue('messagingSenderId'),
+  appId: requireFirebaseConfigValue('appId'),
 };
 
 // Initialize App
