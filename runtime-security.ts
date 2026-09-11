@@ -36,14 +36,23 @@ export function invalidatePremiumEntitlement(uid: string): void {
   if (normalizedUid) entitlementCache.delete(normalizedUid);
 }
 
+function hasActivePremium(data: any): boolean {
+  const plan = String(data?.plan || '').toUpperCase();
+  const premiumFlag = data?.isPremium === true || data?.premium === true || plan === 'PRO' || plan === 'PREMIUM';
+  if (!premiumFlag) return false;
+  const expiration = data?.premiumExpiresAt;
+  if (!expiration) return false;
+  const expirationMs = typeof expiration?.toMillis === 'function' ? expiration.toMillis() : new Date(expiration).getTime();
+  return Number.isFinite(expirationMs) && expirationMs > Date.now();
+}
+
 async function resolvePremiumEntitlement(uid: string): Promise<boolean> {
   const cached = entitlementCache.get(uid);
   if (cached && cached.expiresAt > Date.now()) return cached.isPremium;
   try {
     const snapshot = await (admin as any).firestore().collection('users').doc(uid).get();
     const data = snapshot.exists ? snapshot.data() || {} : {};
-    const plan = String(data.plan || '').toUpperCase();
-    const isPremium = data.isPremium === true || data.premium === true || plan === 'PRO' || plan === 'PREMIUM';
+    const isPremium = hasActivePremium(data);
     entitlementCache.set(uid, { expiresAt: Date.now() + ENTITLEMENT_CACHE_TTL_MS, isPremium });
     return isPremium;
   } catch (error) {
