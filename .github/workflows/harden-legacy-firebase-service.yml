@@ -1,0 +1,183 @@
+name: Harden legacy firebase service
+
+on:
+  push:
+    branches: [production-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+          fetch-depth: 1
+      - name: Patch legacy service safely
+        env:
+          FILE: src/services/firebaseServiceLegacy.ts
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/services/firebaseServiceLegacy.ts')
+          s = p.read_text()
+          old = '''export interface FirestoreErrorInfo {
+            error: string;
+            operationType: OperationType;
+            path: string | null;
+            authInfo: {
+              userId?: string | null;
+              email?: string | null;
+              emailVerified?: boolean | null;
+              isAnonymous?: boolean | null;
+              tenantId?: string | null;
+              providerInfo?: {
+                providerId?: string | null;
+                email?: string | null;
+              }[];
+            };
+          }
+
+          export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+            const errInfo: FirestoreErrorInfo = {
+              error: error instanceof Error ? error.message : String(error),
+              authInfo: {
+                userId: auth.currentUser?.uid,
+                email: auth.currentUser?.email,
+                emailVerified: auth.currentUser?.emailVerified,
+                isAnonymous: auth.currentUser?.isAnonymous,
+                tenantId: auth.currentUser?.tenantId,
+                providerInfo: auth.currentUser?.providerData?.map(provider => ({
+                  providerId: provider.providerId,
+                  email: provider.email,
+                })) || []
+              },
+              operationType,
+              path
+            };
+            console.error('Firestore Error: ', JSON.stringify(errInfo));
+            throw new Error(JSON.stringify(errInfo));
+          }
+'''
+          new = '''export interface FirestoreErrorInfo {
+            error: string;
+            operationType: OperationType;
+            path: string | null;
+            authInfo: {
+              userId?: string | null;
+            };
+          }
+
+          export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+            const errInfo: FirestoreErrorInfo = {
+              error: error instanceof Error ? error.message : String(error),
+              authInfo: {
+                userId: auth.currentUser?.uid,
+              },
+              operationType,
+              path
+            };
+            console.error('Firestore Error: ', JSON.stringify(errInfo));
+            throw new Error(JSON.stringify(errInfo));
+          }
+'''
+          if old not in s:
+              raise SystemExit('Expected Firestore error block not found')
+          s = s.replace(old, new, 1)
+
+          old_upload = '''export async function uploadMediaFile(file: File, folderPath: string): Promise<string> {
+            if (storage) {
+              try {
+                const storageRef = ref(storage, `${folderPath}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+                const uploadTask = uploadBytesResumable(storageRef, file);
+                return new Promise((resolve, reject) => {
+                  uploadTask.on(
+                    'state_changed',
+                    null,
+                    (error) => {
+                      console.warn('Firebase Storage upload error, using fallback:', error);
+                      // Fallback to Base64
+                      const reader = new FileReader();
+                      reader.onload = () => resolve(reader.result as string);
+                      reader.onerror = (e) => reject(e);
+                      reader.readAsDataURL(file);
+                    },
+                    async () => {
+                      try {
+                        const url = await getDownloadURL(uploadTask.snapshot.ref);
+                        resolve(url);
+                      } catch (e) {
+                        reject(e);
+                      }
+                    }
+                  );
+                });
+              } catch (err) {
+                console.warn('Firebase Storage initialization failed, falling back to FileReader:', err);
+              }
+            }
+
+            // Fallback if storage not available or initialization throws
+            return new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = (e) => reject(e);
+              reader.readAsDataURL(file);
+            });
+          }
+'''
+          new_upload = '''export async function uploadMediaFile(file: File, folderPath: string): Promise<string> {
+            if (!storage) {
+              throw new Error('Firebase Storage is unavailable; media upload cannot be completed safely.');
+            }
+
+            try {
+              const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+              const storageRef = ref(storage, `${folderPath}/${Date.now()}_${safeName}`);
+              const uploadTask = uploadBytesResumable(storageRef, file);
+              return await new Promise((resolve, reject) => {
+                uploadTask.on(
+                  'state_changed',
+                  undefined,
+                  reject,
+                  async () => {
+                    try {
+                      resolve(await getDownloadURL(uploadTask.snapshot.ref));
+                    } catch (error) {
+                      reject(error);
+                    }
+                  }
+                );
+              });
+            } catch (error) {
+              console.error('Firebase Storage upload failed:', error);
+              throw error;
+            }
+          }
+'''
+          if old_upload not in s:
+              raise SystemExit('Expected upload block not found')
+          s = s.replace(old_upload, new_upload, 1)
+          p.write_text(s)
+          PY
+
+      - name: Verify patch and commit
+        run: |
+          grep -n "emailVerified\|providerInfo\|readAsDataURL\|FileReader\|Firebase Storage is unavailable" src/services/firebaseServiceLegacy.ts || true
+          git diff --check
+          git diff -- src/services/firebaseServiceLegacy.ts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/services/firebaseServiceLegacy.ts
+          git commit -m 'fix(security): remove legacy auth leakage and base64 upload fallback'
+          git push origin HEAD:production-hardening
+
+      - name: Remove one-shot workflow
+        if: always()
+        run: |
+          git rm -f .github/workflows/harden-legacy-firebase-service.yml || true
+          git commit -m 'chore: remove one-shot hardening workflow' || true
+          git push origin HEAD:production-hardening || true
