@@ -12,18 +12,35 @@ if (!(admin as any).apps?.length) {
   try { (admin as any).initializeApp(); } catch (e) { console.error('Firebase Admin initialization notice:', e); }
 }
 
-async function getAuthoritativeAthlete(clientAthlete: any): Promise<any> {
-  if (!clientAthlete || !clientAthlete.id) return clientAthlete;
-  try {
-    const docSnap = await (admin as any).firestore().collection('athletes').doc(clientAthlete.id).get();
-    if (docSnap.exists) {
-      const data = docSnap.data()!;
-      return { ...clientAthlete, ...data, id: clientAthlete.id, trustScore: data.trustScore !== undefined ? data.trustScore : (clientAthlete.trustScore || 70), isVerified: data.isVerified !== undefined ? data.isVerified : (clientAthlete.isVerified || false), rating: data.rating !== undefined ? data.rating : (clientAthlete.rating || 4.5), stats: data.stats || clientAthlete.stats || {} };
-    }
-  } catch (e) { console.error('Error fetching authoritative athlete:', e); }
-  return { ...clientAthlete, trustScore: Math.min(100, Math.max(0, clientAthlete.trustScore || 70)), isVerified: Boolean(clientAthlete.isVerified) };
+const AI_PUBLIC_ATHLETE_FIELDS = [
+  'name', 'avatar', 'sport', 'position', 'age', 'city', 'province', 'level',
+  'preferredFootOrHand', 'bio', 'stats', 'availableForTrials', 'isVerified',
+  'rating', 'verificationTier', 'activityLevel', 'trustScore'
+];
+
+function toPublicAiAthlete(id: string, data: any): any {
+  const publicAthlete: any = { id };
+  for (const field of AI_PUBLIC_ATHLETE_FIELDS) {
+    if (data?.[field] !== undefined) publicAthlete[field] = data[field];
+  }
+  return publicAthlete;
 }
-async function getAuthoritativeCandidates(candidates: any[]): Promise<any[]> { if (!Array.isArray(candidates)) return []; return Promise.all(candidates.map(async c => getAuthoritativeAthlete(c))); }
+
+async function getAuthoritativeAthlete(clientAthlete: any): Promise<any> {
+  if (!clientAthlete || !clientAthlete.id) return null;
+  const id = String(clientAthlete.id);
+  try {
+    const docSnap = await (admin as any).firestore().collection('publicAthletes').doc(id).get();
+    if (docSnap.exists) return toPublicAiAthlete(id, docSnap.data() || {});
+  } catch (e) { console.error('Error fetching public athlete projection for AI:', e); }
+  return null;
+}
+
+async function getAuthoritativeCandidates(candidates: any[]): Promise<any[]> {
+  if (!Array.isArray(candidates)) return [];
+  const resolved = await Promise.all(candidates.map(async c => getAuthoritativeAthlete(c)));
+  return resolved.filter(Boolean);
+}
 
 const app = express();
 const PORT = 3000;
