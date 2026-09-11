@@ -5,13 +5,16 @@ if (!(admin as any).apps?.length) {
   try {
     (admin as any).initializeApp();
   } catch (error) {
-    console.error('Firebase Admin initialization notice:', error);
+    console.error('Runtime security Firebase initialization notice:', error);
   }
 }
 
 export async function requireAuthenticated(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Token de autenticación requerido.' });
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Token de autenticación requerido.' });
+  }
+
   try {
     const token = authHeader.slice('Bearer '.length).trim();
     if (!token) return res.status(401).json({ error: 'Token de autenticación requerido.' });
@@ -31,7 +34,6 @@ export async function requireAdmin(req: any, res: any, next: any) {
   return res.status(403).json({ error: 'Se requieren permisos administrativos.' });
 }
 
-const aiUsage = new Map<string, { day: string; count: number }>();
 const entitlementCache = new Map<string, { expiresAt: number; isPremium: boolean }>();
 const FREE_AI_DAILY_LIMIT = 5;
 const PREMIUM_AI_DAILY_LIMIT = 100;
@@ -40,6 +42,7 @@ const ENTITLEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 async function resolvePremiumEntitlement(uid: string): Promise<boolean> {
   const cached = entitlementCache.get(uid);
   if (cached && cached.expiresAt > Date.now()) return cached.isPremium;
+
   try {
     const snapshot = await (admin as any).firestore().collection('users').doc(uid).get();
     const data = snapshot.exists ? snapshot.data() || {} : {};
@@ -54,31 +57,62 @@ async function resolvePremiumEntitlement(uid: string): Promise<boolean> {
   }
 }
 
+async function reserveDailyAiQuota(uid: string, day: string, limit: number): Promise<number> {
+  const db = (admin as any).firestore();
+  const quotaRef = db.collection('aiUsageDaily').doc(`${uid}_${day}`);
+
+  return db.runTransaction(async (transaction: any) => {
+    const snapshot = await transaction.get(quotaRef);
+    const currentCount = snapshot.exists ? Number(snapshot.data()?.count || 0) : 0;
+
+    if (currentCount >= limit) return -1;
+
+    const nextCount = currentCount + 1;
+    transaction.set(quotaRef, {
+      uid,
+      day,
+      count: nextCount,
+      limit,
+      updatedAt: (admin as any).firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    return nextCount;
+  });
+}
+
 export async function enforceAiBudget(req: any, res: any, next: any) {
   const uid = String(req.user?.uid || '');
   if (!uid) return res.status(401).json({ error: 'Usuario autenticado requerido.' });
+
   const isPremium = await resolvePremiumEntitlement(uid);
   const limit = isPremium ? PREMIUM_AI_DAILY_LIMIT : FREE_AI_DAILY_LIMIT;
   const day = new Date().toISOString().slice(0, 10);
-  const current = aiUsage.get(uid);
-  if (!current || current.day !== day) {
-    aiUsage.set(uid, { day, count: 1 });
+
+  try {
+    const count = await reserveDailyAiQuota(uid, day, limit);
+    if (count < 0) {
+      return res.status(429).json({
+        error: `Has alcanzado tu límite diario de ${limit} consultas con Inteligencia Artificial.`,
+        limit,
+        resetAt: `${day}T23:59:59.999Z`,
+      });
+    }
+
     res.setHeader('X-AI-Daily-Limit', String(limit));
-    res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - 1)));
+    res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - count)));
     return next();
+  } catch (error) {
+    console.error('AI quota transaction failed:', error);
+    return res.status(503).json({ error: 'No se pudo verificar el límite diario de IA. Intente nuevamente.' });
   }
-  if (current.count >= limit) {
-    return res.status(429).json({ error: `Has alcanzado tu límite diario de ${limit} consultas con Inteligencia Artificial.`, limit, resetAt: `${day}T23:59:59.999Z` });
-  }
-  current.count += 1;
-  res.setHeader('X-AI-Daily-Limit', String(limit));
-  res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - current.count)));
-  return next();
 }
 
 function requirePaymentAuthentication(req: any, res: any, next: any) {
   return requireAuthenticated(req, res, () => {
-    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) return res.status(503).json({ error: 'Mercado Pago no está configurado para operar en este entorno.' });
+    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
+      return res.status(503).json({ error: 'Mercado Pago no está configurado para operar en este entorno.' });
+    }
+
     if (!req.body || typeof req.body !== 'object') req.body = {};
     req.body.userId = req.user.uid;
     if (req.user.email) req.body.userEmail = req.user.email;
@@ -86,6 +120,8 @@ function requirePaymentAuthentication(req: any, res: any, next: any) {
   });
 }
 
+// Compatibility guard: sensitive routes are protected at registration time until
+// every route consumes the exported middleware directly.
 const originalGet = express.application.get;
 const originalPost = express.application.post;
 const originalPut = express.application.put;
@@ -96,14 +132,29 @@ const originalUse = express.application.use;
 function protectSensitiveRoute(original: any) {
   return function protectedRoute(this: any, path: any, ...handlers: any[]) {
     if (typeof path === 'string' && path.startsWith('/api/financial/')) {
-      const adminOnly = new Set(['/api/financial/summary', '/api/financial/reserve-config', '/api/financial/executive-report']);
+      const adminOnly = new Set([
+        '/api/financial/summary',
+        '/api/financial/reserve-config',
+        '/api/financial/executive-report',
+      ]);
       return original.call(this, path, adminOnly.has(path) ? requireAdmin : requireAuthenticated, ...handlers);
     }
-    if (typeof path === 'string' && path.startsWith('/api/admin/')) return original.call(this, path, requireAdmin, ...handlers);
-    if (typeof path === 'string' && path.startsWith('/api/mercadopago/')) {
-      const protectedPaymentRoutes = new Set(['/api/mercadopago/create-preference', '/api/mercadopago/verify-payment', '/api/mercadopago/cancel-subscription']);
-      if (protectedPaymentRoutes.has(path)) return original.call(this, path, requirePaymentAuthentication, ...handlers);
+
+    if (typeof path === 'string' && path.startsWith('/api/admin/')) {
+      return original.call(this, path, requireAdmin, ...handlers);
     }
+
+    if (typeof path === 'string' && path.startsWith('/api/mercadopago/')) {
+      const protectedPaymentRoutes = new Set([
+        '/api/mercadopago/create-preference',
+        '/api/mercadopago/verify-payment',
+        '/api/mercadopago/cancel-subscription',
+      ]);
+      if (protectedPaymentRoutes.has(path)) {
+        return original.call(this, path, requirePaymentAuthentication, ...handlers);
+      }
+    }
+
     return original.call(this, path, ...handlers);
   };
 }
