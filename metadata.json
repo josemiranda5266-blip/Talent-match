@@ -1,0 +1,6 @@
+{
+  "name": "TalentMatch",
+  "description": "Red Inteligente de Scouteo Deportivo con IA para atletas, clubes, entrenadores y representantes",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
