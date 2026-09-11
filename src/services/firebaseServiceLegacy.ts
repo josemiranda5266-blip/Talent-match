@@ -90,14 +90,6 @@ export interface FirestoreErrorInfo {
   path: string | null;
   authInfo: {
     userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
   };
 }
 
@@ -106,14 +98,6 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
     },
     operationType,
     path
@@ -124,43 +108,27 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Media Upload to Firebase Storage
 export async function uploadMediaFile(file: File, folderPath: string): Promise<string> {
-  if (storage) {
-    try {
-      const storageRef = ref(storage, `${folderPath}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
-      const uploadTask = uploadBytesResumable(storageRef, file);
-      return new Promise((resolve, reject) => {
-        uploadTask.on(
-          'state_changed',
-          null,
-          (error) => {
-            console.warn('Firebase Storage upload error, using fallback:', error);
-            // Fallback to Base64
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = (e) => reject(e);
-            reader.readAsDataURL(file);
-          },
-          async () => {
-            try {
-              const url = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve(url);
-            } catch (e) {
-              reject(e);
-            }
-          }
-        );
-      });
-    } catch (err) {
-      console.warn('Firebase Storage initialization failed, falling back to FileReader:', err);
-    }
+  if (!storage) {
+    throw new Error('Firebase Storage is not configured.');
   }
 
-  // Fallback if storage not available or initialization throws
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storageRef = ref(storage, `${folderPath}/${Date.now()}_${safeName}`);
+  const uploadTask = uploadBytesResumable(storageRef, file);
+
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (e) => reject(e);
-    reader.readAsDataURL(file);
+    uploadTask.on(
+      'state_changed',
+      undefined,
+      (error) => reject(error),
+      async () => {
+        try {
+          resolve(await getDownloadURL(uploadTask.snapshot.ref));
+        } catch (error) {
+          reject(error);
+        }
+      }
+    );
   });
 }
 
