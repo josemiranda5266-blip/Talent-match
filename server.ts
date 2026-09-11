@@ -180,7 +180,12 @@ app.post('/api/mercadopago/webhook',async(req,res)=>{
     await db.runTransaction(async(transaction:any)=>{
       const userSnap=await transaction.get(userRef);
       if(!userSnap.exists)throw new Error('PAYMENT_USER_NOT_FOUND');
-      transaction.set(userRef,{isPremium:true,premium:true,plan:'PRO',subscriptionPlanId:reference.planId||null,premiumActivatedAt:(admin as any).firestore.FieldValue.serverTimestamp(),premiumPaymentId:String(payment.id),premiumAmountArs:transactionAmount,premiumCoupon:coupon||null,premiumSource:'mercadopago'},{merge:true});
+      const currentData=userSnap.data()||{};
+      const currentExpiration=currentData.premiumExpiresAt;
+      const currentExpirationMs=typeof currentExpiration?.toMillis==='function'?currentExpiration.toMillis():new Date(currentExpiration||0).getTime();
+      const baseMs=Number.isFinite(currentExpirationMs)&&currentExpirationMs>Date.now()?currentExpirationMs:Date.now();
+      const premiumExpiresAt=new Date(baseMs+30*24*60*60*1000);
+      transaction.set(userRef,{isPremium:true,premium:true,plan:'PRO',subscriptionPlanId:reference.planId||null,premiumActivatedAt:(admin as any).firestore.FieldValue.serverTimestamp(),premiumExpiresAt,premiumPaymentId:String(payment.id),premiumAmountArs:transactionAmount,premiumCoupon:coupon||null,premiumSource:'mercadopago'},{merge:true});
     });
     invalidatePremiumEntitlement(uid);
     const eventRef=req.mercadoPagoWebhookEventRef;
