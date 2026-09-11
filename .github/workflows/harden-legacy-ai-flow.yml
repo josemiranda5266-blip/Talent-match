@@ -1,0 +1,64 @@
+name: One-shot legacy AI hardening
+
+on:
+  push:
+    branches: [production-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout production-hardening
+        uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+          fetch-depth: 1
+
+      - name: Remove stale promotional and simulated AI paths
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('server.ts')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = {
+              "['TALENT100','PROMO100','PRUEBA100']": "['TALENT100','PROMO100']",
+              "['TALENT100','PROMO100','PRUEBA100'].includes(c)": "['TALENT100','PROMO100'].includes(c)",
+              "const ai=getGeminiClient();if(!ai)return res.json(aiFallbackProfile(a));": "const ai=getGeminiClient();if(!ai)return res.status(503).json({error:'La IA no está configurada en el servidor.'});",
+          }
+
+          for old, new in replacements.items():
+              text = text.replace(old, new)
+
+          if 'PRUEBA100' in text:
+              raise SystemExit('PRUEBA100 still present in server.ts')
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Verify production build
+        run: |
+          corepack enable || true
+          curl -fsSL https://bun.sh/install | bash
+          export PATH="$HOME/.bun/bin:$PATH"
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Commit changes and remove this workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git rm .github/workflows/harden-legacy-ai-flow.yml
+          if git diff --cached --quiet; then
+            echo 'No changes required.'
+            exit 0
+          fi
+          git commit -m 'security: remove stale simulated AI and promo paths'
+          git push origin HEAD:production-hardening
