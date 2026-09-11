@@ -12,6 +12,8 @@ export async function requireFirebaseUser(req: any, res: any, next: any) {
     if (!token) return res.status(401).json({ error: 'Token de autenticación requerido.' });
     req.user = await firebaseAuth().verifyIdToken(token);
     res.setHeader('Cache-Control', 'no-store');
+    const requestedCoupon = String(req.body?.code || req.body?.couponCode || '').trim().toUpperCase();
+    if (requestedCoupon === 'PRUEBA100') return res.status(404).json({ valid: false, error: 'Cupón no válido o expirado.' });
     return next();
   } catch (error) {
     console.error('Mercado Pago auth verification failed:', error);
@@ -82,7 +84,8 @@ export function enforceServerPrice(req: any, res: any, next: any) {
   req.body.userId = req.user.uid;
   req.body.userEmail = req.user.email || undefined;
   req.body.priceMonthly = price;
-  if (coupon && !['TALENT100', 'PROMO100', 'PRUEBA100', 'PROMO50', 'ARGENTINA50', 'PRO2025', 'CLUB30', 'TALENT20'].includes(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
+  if (coupon === 'PRUEBA100') return res.status(400).json({ error: 'Cupón no autorizado.' });
+  if (coupon && !['TALENT100', 'PROMO100', 'PROMO50', 'ARGENTINA50', 'PRO2025', 'CLUB30', 'TALENT20'].includes(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
   return next();
 }
 
