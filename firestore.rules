@@ -49,7 +49,7 @@ service cloud.firestore {
     }
 
     match /searches/{searchId} {
-      allow get: if isAuthenticated() || isAdmin();
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAuthenticated() && (request.resource.data.clubId == request.auth.uid || isAdmin());
       allow update: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid && request.resource.data.clubId == resource.data.clubId);
@@ -78,7 +78,7 @@ service cloud.firestore {
     }
 
     match /teams/{teamId} {
-      allow get: if isAuthenticated() || isAdmin();
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAuthenticated() && (request.resource.data.ownerUserId == request.auth.uid || isAdmin());
       allow update: if isAdmin() || (isAuthenticated() && resource.data.ownerUserId == request.auth.uid && request.resource.data.ownerUserId == resource.data.ownerUserId);
@@ -91,7 +91,7 @@ service cloud.firestore {
     }
 
     match /tournaments/{tournamentId} {
-      allow get: if isAuthenticated() || isAdmin();
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAuthenticated() && (request.resource.data.organizerUserId == request.auth.uid || isAdmin());
       allow update: if isAdmin() || (isAuthenticated() && resource.data.organizerUserId == request.auth.uid && request.resource.data.organizerUserId == resource.data.organizerUserId);
@@ -144,10 +144,10 @@ service cloud.firestore {
       allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
     }
 
-    // Current review service uses /reviews. Reads require authentication because documents
-    // contain authorUserId; anonymous/public field-level access is deferred to a projection.
+    // Current review service uses /reviews. Documents contain authorUserId and must not be globally readable.
     match /reviews/{reviewId} {
-      allow get, list: if isAdmin() || isAuthenticated();
+      allow get: if isAdmin() || (isAuthenticated() && (resource.data.authorUserId == request.auth.uid || resource.data.targetId == request.auth.uid));
+      allow list: if isAdmin();
       allow create: if isAdmin() || (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
       allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid && request.resource.data.authorUserId == resource.data.authorUserId);
     }
