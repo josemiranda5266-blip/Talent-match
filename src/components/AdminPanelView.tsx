@@ -1380,13 +1380,13 @@ export const AdminPanelView: React.FC = () => {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
-                        onClick={() => handleSuspendAccount(rep.reportedUserId, rep.reporterName || 'Usuario')}
+                        onClick={() => { if (rep.reportedUserId) handleSuspendAccount(rep.reportedUserId, rep.reporterName || 'Usuario'); }}
                         className="px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-xs uppercase rounded-xl hover:bg-amber-500/30"
                       >
                         Suspender
                       </button>
                       <button
-                        onClick={() => handleBanAccount(rep.reportedUserId, rep.reporterName || 'Usuario')}
+                        onClick={() => { if (rep.reportedUserId) handleBanAccount(rep.reportedUserId, rep.reporterName || 'Usuario'); }}
                         className="px-3 py-1.5 bg-rose-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-rose-600 shadow-lg shadow-rose-500/20"
                       >
                         BAN Definitivo

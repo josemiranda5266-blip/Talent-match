@@ -102,7 +102,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     }
   ];
 
-  const currentData = steps[currentStep] ?? steps[0];
+  const currentData = steps[currentStep] ?? steps[0]!;
   const IconComponent = currentData.icon;
 
   const handleNext = () => {
