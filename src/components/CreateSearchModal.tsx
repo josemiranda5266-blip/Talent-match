@@ -92,7 +92,7 @@ export const CreateSearchModal: React.FC<CreateSearchModalProps> = ({
       description: description || `Búsqueda abierta de ${positionNeeded} (${categoryNeeded}) para ${clubName} en ${city}.`,
       requirements: requirementsText.split('\n').filter((r) => r.trim().length > 0),
       isFeatured: true,
-      postedAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
+      postedAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString(),
       applicantCount: 0,
       status: 'Abierta',
     };

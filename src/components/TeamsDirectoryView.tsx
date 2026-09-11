@@ -114,7 +114,7 @@ export const TeamsDirectoryView: React.FC<TeamsDirectoryViewProps> = ({
       lookingForFriendlies: newLookingForFriendlies,
       isFreeListing: true,
       isVerified: true,
-      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
+      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString(),
       memberCount: 15,
     };
 

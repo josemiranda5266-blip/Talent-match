@@ -78,7 +78,7 @@ export const TalentRadarModal: React.FC<TalentRadarModalProps> = ({
       active: true,
       notifyEmail,
       notifyPush,
-      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
+      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString(),
       matchesCount: 0
     };
 

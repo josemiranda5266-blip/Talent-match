@@ -115,7 +115,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
       province,
       city,
       venueName: venueName || `${city}, ${province}`,
-      startDate: startDate || new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
+      startDate: startDate || new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString(),
       endDate: endDate || undefined,
       description,
       prizes: prizes || undefined,
@@ -126,7 +126,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
       contactInstagram,
       bannerImage: bannerImage || PRESET_BANNERS[0].url,
       isVerifiedOrganizer: true,
-      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
+      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString(),
       status: 'Inscripciones Abiertas',
     };
 
