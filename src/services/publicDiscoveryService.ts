@@ -1,4 +1,4 @@
-import { collection, db, getDocs } from '../lib/firebase';
+import { collection, db, getDocs, query, where } from '../lib/firebase';
 import { Athlete, ClubSearch, FreeTeamProfile, Tournament } from '../types';
 import { INITIAL_ATHLETES, INITIAL_SEARCHES, INITIAL_FREE_TEAMS, INITIAL_TOURNAMENTS } from '../data/mockData';
 
@@ -13,12 +13,11 @@ export interface AthleteDiscoveryFilters {
   availableOnly?: boolean;
 }
 
-/** Public directory reads use sanitized projection collections only. */
+/** Public directory reads use sanitized, explicitly published projection collections only. */
 export async function fetchPublicAthletes(filters?: AthleteDiscoveryFilters): Promise<Athlete[]> {
   try {
-    const snapshot = await getDocs(collection(db, 'publicAthletes'));
+    const snapshot = await getDocs(query(collection(db, 'publicAthletes'), where('published', '==', true)));
     let list: Athlete[] = snapshot.docs
-      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as Athlete));
     list = list.filter((athlete) => athlete.availableForTrials !== false);
     return filterAthletes(list, filters);
@@ -31,9 +30,8 @@ export async function fetchPublicAthletes(filters?: AthleteDiscoveryFilters): Pr
 
 export async function fetchPublicClubSearches(): Promise<ClubSearch[]> {
   try {
-    const snapshot = await getDocs(collection(db, 'publicSearches'));
+    const snapshot = await getDocs(query(collection(db, 'publicSearches'), where('published', '==', true)));
     return snapshot.docs
-      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as ClubSearch));
   } catch (error) {
     console.error('Error fetching public club searches:', error);
@@ -44,9 +42,8 @@ export async function fetchPublicClubSearches(): Promise<ClubSearch[]> {
 
 export async function fetchPublicTeams(): Promise<FreeTeamProfile[]> {
   try {
-    const snapshot = await getDocs(collection(db, 'publicTeams'));
+    const snapshot = await getDocs(query(collection(db, 'publicTeams'), where('published', '==', true)));
     return snapshot.docs
-      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as FreeTeamProfile));
   } catch (error) {
     console.error('Error fetching public teams:', error);
@@ -57,9 +54,8 @@ export async function fetchPublicTeams(): Promise<FreeTeamProfile[]> {
 
 export async function fetchPublicTournaments(): Promise<Tournament[]> {
   try {
-    const snapshot = await getDocs(collection(db, 'publicTournaments'));
+    const snapshot = await getDocs(query(collection(db, 'publicTournaments'), where('published', '==', true)));
     return snapshot.docs
-      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
       .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as Tournament));
   } catch (error) {
     console.error('Error fetching public tournaments:', error);
