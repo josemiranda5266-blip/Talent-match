@@ -1,0 +1,84 @@
+name: Harden financial inputs
+
+on:
+  push:
+    branches: [production-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+          fetch-depth: 1
+      - name: Harden financial endpoint validation
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('server.ts')
+          text = path.read_text(encoding='utf-8')
+
+          helper = r'''
+function finiteNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function boundedNumber(value: unknown, min: number, max: number): number | null {
+  const n = finiteNumber(value);
+  return n !== null && n >= min && n <= max ? n : null;
+}
+'''
+          anchor = "const app = express();"
+          if 'function boundedNumber(value: unknown' not in text:
+              text = text.replace(anchor, helper + "\n" + anchor, 1)
+
+          old = """app.post('/api/financial/reserve-config',(req,res)=>{\n const{operationPct,growthPct,emergencyPct}=req.body;\n if(operationPct===undefined||growthPct===undefined||emergencyPct===undefined)return res.status(400).json({error:'Faltan porcentajes.'});\n const sum=Number(operationPct)+Number(growthPct)+Number(emergencyPct);\n if(Math.abs(sum-100)>.1)return res.status(400).json({error:'Los porcentajes deben sumar 100.'});\n reserveFundConfig.operationPct=Number(operationPct);\n reserveFundConfig.growthPct=Number(growthPct);\n reserveFundConfig.emergencyPct=Number(emergencyPct);"""
+          new = """app.post('/api/financial/reserve-config',(req,res)=>{\n const operationPct=boundedNumber(req.body?.operationPct,0,100);\n const growthPct=boundedNumber(req.body?.growthPct,0,100);\n const emergencyPct=boundedNumber(req.body?.emergencyPct,0,100);\n if(operationPct===null||growthPct===null||emergencyPct===null)return res.status(400).json({error:'Los porcentajes deben ser números entre 0 y 100.'});\n const sum=operationPct+growthPct+emergencyPct;\n if(Math.abs(sum-100)>.1)return res.status(400).json({error:'Los porcentajes deben sumar 100.'});\n reserveFundConfig.operationPct=operationPct;\n reserveFundConfig.growthPct=growthPct;\n reserveFundConfig.emergencyPct=emergencyPct;"""
+          if old in text:
+              text = text.replace(old,new,1)
+          else:
+              raise SystemExit('reserve-config target not found')
+
+          old = """app.post('/api/financial/simulate-growth',(req,res)=>{\n const{additionalUsers=1000,aiMultiplier=1,firestorePriceMultiplier=1,conversionRatePct=3.5}=req.body;\n const newTotalUsers=currentActiveUsers+Number(additionalUsers);"""
+          new = """app.post('/api/financial/simulate-growth',(req,res)=>{\n const additionalUsers=boundedNumber(req.body?.additionalUsers ?? 1000,0,10000000);\n const aiMultiplier=boundedNumber(req.body?.aiMultiplier ?? 1,0,100);\n const firestorePriceMultiplier=boundedNumber(req.body?.firestorePriceMultiplier ?? 1,0,100);\n const conversionRatePct=boundedNumber(req.body?.conversionRatePct ?? 3.5,0,100);\n if(additionalUsers===null||aiMultiplier===null||firestorePriceMultiplier===null||conversionRatePct===null)return res.status(400).json({error:'Parámetros de crecimiento inválidos.'});\n const newTotalUsers=currentActiveUsers+additionalUsers;"""
+          if old in text:
+              text = text.replace(old,new,1)
+          else:
+              raise SystemExit('simulate-growth target not found')
+
+          old = """app.post('/api/financial/simulate-pricing',(req,res)=>{\n const{monthlySubArs=14900,annualSubArs=129000,clubSubArs=49900,freeAiDailyLimit=5,projectedSubscribers=50}=req.body;"""
+          new = """app.post('/api/financial/simulate-pricing',(req,res)=>{\n const monthlySubArs=boundedNumber(req.body?.monthlySubArs ?? 14900,1,100000000);\n const annualSubArs=boundedNumber(req.body?.annualSubArs ?? 129000,1,100000000);\n const clubSubArs=boundedNumber(req.body?.clubSubArs ?? 49900,1,100000000);\n const freeAiDailyLimit=boundedNumber(req.body?.freeAiDailyLimit ?? 5,0,100000);\n const projectedSubscribers=boundedNumber(req.body?.projectedSubscribers ?? 50,0,10000000);\n if(monthlySubArs===null||annualSubArs===null||clubSubArs===null||freeAiDailyLimit===null||projectedSubscribers===null)return res.status(400).json({error:'Parámetros de precios inválidos.'});"""
+          if old in text:
+              text = text.replace(old,new,1)
+          else:
+              raise SystemExit('simulate-pricing target not found')
+
+          text = text.replace("const period=(req.query.period as string)||'monthly';", "const period=String(req.query.period||'monthly');\n if(!['monthly','quarterly','annual'].includes(period))return res.status(400).json({error:'Período inválido.'});", 1)
+
+          path.write_text(text,encoding='utf-8')
+      - name: Build and typecheck
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+      - name: Commit and remove temporary workflows
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git rm .github/workflows/harden-financial-inputs.yml
+          if git ls-files --error-unmatch .github/workflows/finalize-ai-hardening.yml >/dev/null 2>&1; then git rm .github/workflows/finalize-ai-hardening.yml; fi
+          if git ls-files --error-unmatch .github/workflows/remove-ai-fallbacks.yml >/dev/null 2>&1; then git rm .github/workflows/remove-ai-fallbacks.yml; fi
+          git commit -m 'security: harden financial endpoint inputs'
+          git push origin HEAD:production-hardening
