@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import * as admin from 'firebase-admin';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const firebaseAuth = () => (admin as any).auth();
+const db = getFirestore();
 const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);
 
 export async function requireFirebaseUser(req: any, res: any, next: any) {
@@ -55,12 +57,12 @@ export async function verifyMercadoPagoWebhook(req: any, res: any, next: any) {
 
 export async function recordWebhookIdempotency(req: any, res: any, next: any) {
   const eventId = String(req.body?.id || `${req.body?.type || 'unknown'}:${req.body?.action || 'unknown'}:${req.body?.data?.id || 'unknown'}`);
-  const ref = admin.firestore().collection('mercadopagoWebhookEvents').doc(crypto.createHash('sha256').update(eventId).digest('hex'));
+  const ref = db.collection('mercadopagoWebhookEvents').doc(crypto.createHash('sha256').update(eventId).digest('hex'));
   try {
-    const result = await admin.firestore().runTransaction(async (transaction: any) => {
+    const result = await db.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(ref);
       if (snapshot.exists) return false;
-      transaction.create(ref, { eventId, type: req.body?.type || null, action: req.body?.action || null, dataId: req.body?.data?.id || null, receivedAt: admin.firestore.FieldValue.serverTimestamp() });
+      transaction.create(ref, { eventId, type: req.body?.type || null, action: req.body?.action || null, dataId: req.body?.data?.id || null, receivedAt: FieldValue.serverTimestamp() });
       return true;
     });
     if (!result) return res.status(200).json({ status: 'already_processed' });
@@ -87,51 +89,4 @@ export function enforceServerPrice(req: any, res: any, next: any) {
   if (coupon === 'PRUEBA100') return res.status(400).json({ error: 'Cupón no autorizado.' });
   if (coupon && !['TALENT100', 'PROMO100', 'PROMO50', 'ARGENTINA50', 'PRO2025', 'CLUB30', 'TALENT20'].includes(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
   return next();
-}
-
-export function rejectSimulatedPreferenceResponse(_req: any, res: any, next: any) {
-  const originalJson = res.json.bind(res);
-  res.json = (payload: any) => {
-    const preferenceId = String(payload?.preferenceId || '');
-    const initPoint = String(payload?.init_point || '');
-    const sandboxInitPoint = String(payload?.sandbox_init_point || '');
-    const isSimulated = Boolean(payload?.immediateApproval) || preferenceId.startsWith('PREF-MP-') || preferenceId.startsWith('pref_free_') || initPoint.includes('/checkout/v1/redirect?pref_id=PREF-MP-') || sandboxInitPoint.includes('/checkout/v1/redirect?pref_id=PREF-MP-');
-    if (isSimulated) {
-      console.error('Mercado Pago returned a simulated/fallback preference; refusing to expose it as a real payment result.');
-      return originalJson({ error: 'Mercado Pago no devolvió una preferencia real. Configure credenciales válidas y vuelva a intentar.' });
-    }
-    return originalJson(payload);
-  };
-  return next();
-}
-
-export async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
-  const paymentId = String(req.body?.paymentId || '').trim();
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-  if (!accessToken || !paymentId) return res.status(400).json({ error: 'No es posible verificar el pago sin credenciales y paymentId.' });
-  try {
-    const response = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!response.ok) return res.status(502).json({ error: 'Mercado Pago no pudo validar el pago.' });
-    const payment = await response.json();
-    const externalReference = String(payment.external_reference || '');
-    let reference: any = {};
-    try { reference = JSON.parse(externalReference); } catch { reference = {}; }
-    const transactionAmount = Number(payment.transaction_amount);
-    const referencedPrice = Number(reference.price);
-    const expectedRequestedAmount = Number(req.body?.amount);
-    const expectedAmount = Number.isFinite(expectedRequestedAmount) && expectedRequestedAmount > 0 ? expectedRequestedAmount : referencedPrice;
-    if (payment.status !== 'approved' || reference.userId !== req.user?.uid) return res.status(403).json({ error: 'El pago no está aprobado o no pertenece al usuario autenticado.' });
-    if (!ALLOWED_PLAN_PRICES_ARS.has(referencedPrice) || !ALLOWED_PLAN_PRICES_ARS.has(transactionAmount)) return res.status(403).json({ error: 'El importe del pago no corresponde a un plan autorizado.' });
-    if (transactionAmount !== referencedPrice || (Number.isFinite(expectedAmount) && expectedAmount > 0 && transactionAmount !== expectedAmount)) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe esperado.' });
-    if (reference.planId && req.body?.planId && String(reference.planId) !== String(req.body.planId)) return res.status(403).json({ error: 'El plan confirmado por Mercado Pago no coincide con la solicitud.' });
-    req.body.paymentId = String(payment.id); req.body.amount = transactionAmount; req.body.planName = reference.planName || req.body.planName; req.body.userId = req.user.uid;
-    return next();
-  } catch (error) {
-    console.error('Mercado Pago payment verification failed:', error);
-    return res.status(502).json({ error: 'Error verificando el pago con Mercado Pago.' });
-  }
-}
-
-export async function rejectUnimplementedCancellation(_req: any, res: any, _next: any) {
-  return res.status(501).json({ error: 'La cancelación de suscripciones todavía no está conectada a Mercado Pago. No se informa una cancelación hasta que exista confirmación real del proveedor.' });
 }
