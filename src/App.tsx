@@ -139,7 +139,7 @@ export default function App() {
   const [freeTeams, setFreeTeams] = useState<FreeTeamProfile[]>(demoActive ? INITIAL_FREE_TEAMS : []);
   const [tournaments, setTournaments] = useState<Tournament[]>(demoActive ? INITIAL_TOURNAMENTS : []);
   const [searches, setSearches] = useState<ClubSearch[]>(demoActive ? INITIAL_SEARCHES : []);
-  const [currentAthlete, setCurrentAthlete] = useState<Athlete>(demoActive ? INITIAL_ATHLETES[0] : ({} as Athlete));
+  const [currentAthlete, setCurrentAthlete] = useState<Athlete>(demoActive ? (INITIAL_ATHLETES[0] || ({} as Athlete)) : ({} as Athlete));
   const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
   const [applications, setApplications] = useState<SearchApplication[]>([
@@ -186,8 +186,9 @@ export default function App() {
       setSearches(searchList);
       setFreeTeams(teamList);
       setTournaments(tournList);
-      if (athList.length) {
-        setCurrentAthlete(athList[0]);
+      const firstAthlete = athList[0];
+      if (firstAthlete) {
+        setCurrentAthlete(firstAthlete);
       }
     } catch (e) {
       console.error('Error loading Firestore data:', e);
@@ -198,7 +199,8 @@ export default function App() {
         setSearches(INITIAL_SEARCHES);
         setFreeTeams(INITIAL_FREE_TEAMS);
         setTournaments(INITIAL_TOURNAMENTS);
-        if (INITIAL_ATHLETES.length) setCurrentAthlete(INITIAL_ATHLETES[0]);
+        const firstDemoAthlete = INITIAL_ATHLETES[0];
+        if (firstDemoAthlete) setCurrentAthlete(firstDemoAthlete);
       }
     }
   };
@@ -279,7 +281,7 @@ export default function App() {
       id: `app-${Date.now()}`,
       searchId,
       athleteId: currentAthlete.id,
-      appliedAt: new Date().toISOString().split('T')[0],
+      appliedAt: new Date().toISOString().split('T')[0] || '',
       status: 'Pendiente',
       noteFromAthlete: note,
     };
@@ -953,7 +955,7 @@ export default function App() {
         onClose={() => setIsGrowthModalOpen(false)}
         growthProfile={growthProfile}
         userName={currentUser?.displayName || currentAthlete.name}
-        userRole={currentRole}
+        userRole={currentRole === 'admin' ? 'club' : currentRole}
       />
 
       {/* Phase 5 AI Coach Modal */}
