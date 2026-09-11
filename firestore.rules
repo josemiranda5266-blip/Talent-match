@@ -34,7 +34,7 @@ service cloud.firestore {
     }
 
     match /publicAthletes/{athleteId} {
-      allow get, list: if true;
+      allow get, list: if resource.data.published == true;
       allow create, update, delete: if isAdmin();
     }
 
@@ -47,23 +47,15 @@ service cloud.firestore {
     }
 
     match /publicSearches/{searchId} {
-      allow get, list: if true;
+      allow get, list: if resource.data.published == true;
       allow create, update, delete: if isAdmin();
     }
 
     match /applications/{applicationId} {
       allow get: if isAdmin() || (isAuthenticated() && (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
       allow list: if isAdmin();
-      allow create: if isAdmin() || (isAuthenticated() &&
-        request.resource.data.athleteId == request.auth.uid &&
-        request.resource.data.clubId != request.auth.uid &&
-        exists(/databases/$(database)/documents/searches/$(request.resource.data.searchId)) &&
-        get(/databases/$(database)/documents/searches/$(request.resource.data.searchId)).data.clubId == request.resource.data.clubId);
-      allow update: if isAdmin() || (isAuthenticated() &&
-        resource.data.athleteId == request.auth.uid &&
-        request.resource.data.athleteId == resource.data.athleteId &&
-        request.resource.data.clubId == resource.data.clubId &&
-        request.resource.data.searchId == resource.data.searchId);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid && request.resource.data.clubId != request.auth.uid);
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid && request.resource.data.athleteId == resource.data.athleteId && request.resource.data.clubId == resource.data.clubId);
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid);
     }
 
@@ -76,7 +68,7 @@ service cloud.firestore {
     }
 
     match /publicTeams/{teamId} {
-      allow get, list: if true;
+      allow get, list: if resource.data.published == true;
       allow create, update, delete: if isAdmin();
     }
 
@@ -89,7 +81,7 @@ service cloud.firestore {
     }
 
     match /publicTournaments/{tournamentId} {
-      allow get, list: if true;
+      allow get, list: if resource.data.published == true;
       allow create, update, delete: if isAdmin();
     }
 
