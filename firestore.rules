@@ -27,7 +27,9 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isAdmin() || isOwner(userId);
       allow list: if isAdmin();
-      allow create: if isOwner(userId) && request.resource.data.role != 'admin';
+      allow create: if isOwner(userId) &&
+        request.resource.data.role != 'admin' &&
+        !request.resource.data.keys().hasAny(['isPremium', 'premium', 'plan']);
       allow update: if isAdmin() ||
         (isOwner(userId) &&
           request.resource.data.role == resource.data.role &&
@@ -114,7 +116,7 @@ service cloud.firestore {
       allow update: if isAdmin() ||
         (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
       allow delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
+        (isAuthenticated() && request.resource.data.organizerUserId == request.auth.uid);
     }
 
     match /publicTournaments/{tournamentId} {
@@ -182,7 +184,7 @@ service cloud.firestore {
 
     match /verificationRequests/{requestId} {
       allow get: if isAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid);
+        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAdmin() ||
         (isAuthenticated() && request.resource.data.userId == request.auth.uid);
