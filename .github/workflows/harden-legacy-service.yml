@@ -1,0 +1,101 @@
+name: Harden legacy Firebase service
+
+on:
+  push:
+    branches: [production-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+          fetch-depth: 1
+
+      - name: Apply targeted legacy-service hardening
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('src/services/firebaseServiceLegacy.ts')
+          text = path.read_text(encoding='utf-8')
+
+          pattern = re.compile(r"export interface FirestoreErrorInfo \{.*?export interface UserProfile \{", re.S)
+          replacement = '''export interface FirestoreErrorInfo {
+            error: string;
+            operationType: OperationType;
+            path: string | null;
+            authInfo: {
+              userId?: string | null;
+            };
+          }
+
+          export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+            const errInfo: FirestoreErrorInfo = {
+              error: error instanceof Error ? error.message : String(error),
+              authInfo: {
+                userId: auth.currentUser?.uid,
+              },
+              operationType,
+              path
+            };
+            console.error('Firestore Error: ', JSON.stringify(errInfo));
+            throw new Error(JSON.stringify(errInfo));
+          }
+
+          // Media Upload to Firebase Storage
+          export async function uploadMediaFile(file: File, folderPath: string): Promise<string> {
+            if (!storage) {
+              throw new Error('Firebase Storage is not configured.');
+            }
+
+            const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const storageRef = ref(storage, `${folderPath}/${Date.now()}_${safeName}`);
+            const uploadTask = uploadBytesResumable(storageRef, file);
+
+            return new Promise((resolve, reject) => {
+              uploadTask.on(
+                'state_changed',
+                undefined,
+                (error) => reject(error),
+                async () => {
+                  try {
+                    resolve(await getDownloadURL(uploadTask.snapshot.ref));
+                  } catch (error) {
+                    reject(error);
+                  }
+                }
+              );
+            });
+          }
+
+          export interface UserProfile {'''
+
+          updated, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('Expected legacy Firestore/upload section not found; refusing unsafe edit.')
+
+          path.write_text(updated, encoding='utf-8')
+
+      - name: Verify legacy hardening
+        run: |
+          ! grep -q "FileReader" src/services/firebaseServiceLegacy.ts
+          ! grep -q "providerInfo" src/services/firebaseServiceLegacy.ts
+          ! grep -q "falling back" src/services/firebaseServiceLegacy.ts
+          grep -q "Firebase Storage is not configured" src/services/firebaseServiceLegacy.ts
+          grep -q "auth.currentUser?.uid" src/services/firebaseServiceLegacy.ts
+
+      - name: Commit and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/services/firebaseServiceLegacy.ts
+          git rm .github/workflows/harden-legacy-service.yml
+          git commit -m "fix(firebase): remove legacy media fallback and auth detail logging"
+          git push origin HEAD:production-hardening
