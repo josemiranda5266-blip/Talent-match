@@ -33,7 +33,7 @@ service cloud.firestore {
     }
 
     match /athletes/{athleteId} {
-      allow get: if isAuthenticated() || isAdmin();
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update: if isAdmin() || (isAuthenticated() &&
