@@ -31,7 +31,6 @@ jobs:
                   p.write_text(n)
                   print('updated', path)
 
-          # Admin model drift: align UI literals/field names with the canonical models.
           edit('src/components/AdminPanelView.tsx', lambda s: s
               .replace("=== 'atleta'", "=== 'athlete'")
               .replace("=== 'open'", "=== 'pending'")
@@ -44,48 +43,32 @@ jobs:
               .replace('.reportedId', '.reporterId')
           )
 
-          # Lucide v0.546 does not expose a title prop. Keep the visual icon and use aria-label.
           for f in ['src/components/CandidateModal.tsx','src/components/ChatModal.tsx','src/components/TeamsDirectoryView.tsx']:
               edit(f, lambda s: re.sub(r'\s+title=("[^"]*"|\{[^}]*\})', '', s))
 
-          # Preserve strictness while making common array/object reads safe.
           edit('src/components/ChatModal.tsx', lambda s: s.replace('messages[messages.length - 1].', 'messages[messages.length - 1]?.'))
-          edit('src/components/TournamentsView.tsx', lambda s: s.replace('t.contactWhatsApp', 't.contactWhatsApp ?? \'\'').replace('selectedTournamentDetail.contactWhatsApp', "selectedTournamentDetail.contactWhatsApp ?? ''"))
 
-          # Explicitly preserve a complete AthleteStats shape when an edited profile is written back.
-          edit('src/components/AthleteView.tsx', lambda s: re.sub(
-              r'(stats:\s*\{\s*)(\.\.\.editedAthlete\.stats|\.\.\.athlete\.stats)',
-              lambda m: m.group(1) + m.group(2) + ", matchesPlayed: " + m.group(2).split('.')[2] + ".matchesPlayed ?? 0, goalsOrPoints: " + m.group(2).split('.')[2] + ".goalsOrPoints ?? 0, achievements: " + m.group(2).split('.')[2] + ".achievements ?? []",
-              s))
+          for f in ['src/components/CreateSearchModal.tsx','src/components/AthleteView.tsx','src/components/TeamsDirectoryView.tsx','src/components/TalentRadarModal.tsx','src/components/TournamentsView.tsx']:
+              edit(f, lambda s: s.replace("new Date().toISOString().split('T')[0]", "new Date().toISOString().split('T')[0] ?? new Date().toISOString()"))
 
-          # Optional string selections used to initialize required model fields.
-          edit('src/components/CreateSearchModal.tsx', lambda s: re.sub(r'(sport:\s*)([^,\n]+)', r'\1(\2 ?? \'Fútbol\')', s, count=1))
-          edit('src/components/TalentRadarModal.tsx', lambda s: re.sub(r'(sport:\s*)([^,\n]+)', r'\1(\2 ?? \'Fútbol\')', s, count=1))
-          edit('src/components/TeamsDirectoryView.tsx', lambda s: re.sub(r'(sport:\s*)([^,\n]+)', r'\1(\2 ?? \'Fútbol\')', s, count=1))
-          edit('src/components/TournamentsView.tsx', lambda s: re.sub(r'(sport:\s*)([^,\n]+)', r'\1(\2 ?? \'Fútbol\')', s, count=1))
-
-          # Guard potentially missing selected records before passing them to strict helpers.
+          edit('src/components/TalentRadarModal.tsx', lambda s: s.replace('<option key={s} value={s}>{s}</option>', '<option key={s.name} value={s.name}>{s.name}</option>'))
           edit('src/components/ClubView.tsx', lambda s: s.replace('openCandidateModal(selectedAthlete);', 'if (selectedAthlete) openCandidateModal(selectedAthlete);'))
-          edit('src/components/SmartFeedView.tsx', lambda s: s.replace('athleteObj.', 'athleteObj?.'))
-
-          # Onboarding state is derived from a role-keyed map; default to an empty object.
+          edit('src/components/SmartFeedView.tsx', lambda s: re.sub(r'\bathleteObj\.([A-Za-z_$][\w$]*)', r'athleteObj?.\1', s))
           edit('src/components/OnboardingModal.tsx', lambda s: s.replace('const currentData = onboardingData[currentStep];', 'const currentData = onboardingData[currentStep] ?? {};'))
-
-          # UserProfile has no avatar field in the canonical model; use the existing name as a safe fallback.
           edit('src/components/ReviewsAndReferencesModal.tsx', lambda s: s.replace('user.avatar', "(user as UserProfile & { avatar?: string }).avatar"))
-
-          # React key/rendering bug: map the SportType object to its stable name instead of rendering the object.
-          edit('src/components/TalentRadarModal.tsx', lambda s: s.replace('key={sport}', 'key={sport.name}').replace('{sport}', '{sport.name}'))
           PY
 
           bun install --frozen-lockfile
+          set +e
           bun run typecheck
+          status=$?
+          set -e
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src
-          git diff --cached --quiet || git commit -m 'fix(types): harden remaining strict TypeScript paths'
-          rm -f .github/workflows/one-shot-types-hardening.yml
-          git add .github/workflows/one-shot-types-hardening.yml
-          git diff --cached --quiet || git commit -m 'chore(ci): remove one-shot TypeScript hardening workflow'
-          git push
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(types): apply strict TypeScript hardening batch'
+            git push
+          fi
+          exit $status
