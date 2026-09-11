@@ -19,6 +19,7 @@ async function requireAuthenticated(req: any, res: any, next: any) {
     const token = authHeader.slice('Bearer '.length).trim();
     if (!token) return res.status(401).json({ error: 'Token de autenticación requerido.' });
     req.user = await (admin as any).auth().verifyIdToken(token);
+    res.setHeader('Cache-Control', 'no-store');
     return next();
   } catch (error) {
     console.error('Runtime security token verification failed:', error);
