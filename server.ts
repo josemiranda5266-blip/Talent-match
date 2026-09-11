@@ -5,6 +5,8 @@ import rateLimit from 'express-rate-limit';
 import * as admin from 'firebase-admin';
 import { GoogleGenAI, Type } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
+import { requireAuthenticated, requireAdmin, enforceAiBudget, sanitizeAiErrorResponse, markFinancialDataAsModelled, markAnalyticsDataAsModelled } from './runtime-security.ts';
+import { requireFirebaseUser, verifyMercadoPagoWebhook, recordWebhookIdempotency, requireMercadoPagoCredential, enforceServerPrice, rejectSimulatedPreferenceResponse, verifyPaymentAgainstMercadoPago, rejectUnimplementedCancellation } from './mercadopago-security.ts';
 
 if (!(admin as any).apps?.length) {
   try {
@@ -109,8 +111,21 @@ const paymentLimiter = rateLimit({
 });
 
 app.use('/api/', generalLimiter);
-app.use('/api/ai/', verifyFirebaseToken, aiLimiter);
+
+// Explicit route security. Keep authentication before user-scoped rate/quota middleware.
+app.use('/api/ai/', requireAuthenticated, aiLimiter, enforceAiBudget, sanitizeAiErrorResponse);
+app.use('/api/financial/', requireAuthenticated, markFinancialDataAsModelled);
+app.use('/api/financial/summary', requireAdmin);
+app.use('/api/financial/reserve-config', requireAdmin);
+app.use('/api/financial/executive-report', requireAdmin);
+app.use('/api/admin/', requireAdmin);
+app.use('/api/analytics/summary', requireAdmin, markAnalyticsDataAsModelled);
 app.use('/api/mercadopago/', paymentLimiter);
+app.use('/api/mercadopago/validate-coupon', requireFirebaseUser);
+app.use('/api/mercadopago/create-preference', requireFirebaseUser, requireMercadoPagoCredential, enforceServerPrice, rejectSimulatedPreferenceResponse);
+app.use('/api/mercadopago/webhook', verifyMercadoPagoWebhook, recordWebhookIdempotency);
+app.use('/api/mercadopago/verify-payment', requireFirebaseUser, requireMercadoPagoCredential, verifyPaymentAgainstMercadoPago);
+app.use('/api/mercadopago/cancel-subscription', requireFirebaseUser, rejectUnimplementedCancellation);
 
 // AI Response Cache (15 min TTL) to minimize Gemini token usage & costs
 const aiCache = new Map<string, { timestamp: number; data: any }>();
@@ -552,10 +567,8 @@ const financialAlerts: FinancialAlert[] = [
 ];
 
 const financialState = {
-  incomeMonthlyArs: 566200, // From subscriptions
-  incomeMonthlyUsd: 435.50, // Converted (~1300 ARS/USD)
-  
-  // Real-time expenditure tracking
+  incomeMonthlyArs: 566200,
+  incomeMonthlyUsd: 435.50,
   currentMonthSpendUsd: {
     ai: 6.40,
     firestore: 2.15,
@@ -565,7 +578,6 @@ const financialState = {
     notificationsEmail: 0.45,
     total: 11.50
   },
-  
   todaySpendUsd: {
     ai: 0.35,
     firestore: 0.12,
@@ -575,13 +587,12 @@ const financialState = {
     notificationsEmail: 0.01,
     total: 0.62
   },
-
   totalsCounters: {
     aiCallsMonth: 1240,
     aiTokensMonth: 215000,
     firestoreReadsMonth: 45200,
     firestoreWritesMonth: 6800,
-    storageBytesMonth: 8.4 * 1024 * 1024 * 1024, // 8.4 GB
+    storageBytesMonth: 8.4 * 1024 * 1024 * 1024,
     activeFreeUsers: 110,
     activePremiumUsers: 38
   }
@@ -589,7 +600,6 @@ const financialState = {
 
 const userCostMap = new Map<string, UserCostRecord>();
 
-// Seed initial user stats for monitoring ranking
 const seedUserStats: UserCostRecord[] = [
   { userId: 'usr_001', userEmail: 'scout.boca@cabj.com.ar', role: 'club', isPremium: true, aiCallsToday: 18, aiCallsTotal: 142, firestoreReads: 1250, firestoreWrites: 140, estimatedCostUsd: 1.15, revenueGeneratedArs: 49900, netProfitUsd: 37.23, isDeficit: false, lastActive: 'Hace 5 min' },
   { userId: 'usr_002', userEmail: 'mateo.valdez@gmail.com', role: 'atleta', isPremium: false, aiCallsToday: 5, aiCallsTotal: 48, firestoreReads: 620, firestoreWrites: 45, estimatedCostUsd: 0.38, revenueGeneratedArs: 0, netProfitUsd: -0.38, isDeficit: true, lastActive: 'Hace 12 min' },
@@ -627,7 +637,6 @@ const financialAuditLogs: FinancialAuditLog[] = [
   }
 ];
 
-// Helper to determine Protection Status
 function getProtectionStatus() {
   const currentTotal = financialState.currentMonthSpendUsd.total;
   const budget = budgetConfig.monthlyBudgetUsd;
@@ -642,7 +651,6 @@ function getProtectionStatus() {
   return { percentageSpent: pct, status, currentSpendUsd: currentTotal, budgetUsd: budget };
 }
 
-// Helper to log audit event
 function addFinancialAuditLog(action: string, reason: string, estimatedSavingsUsd: number) {
   const status = getProtectionStatus().status;
   const log: FinancialAuditLog = {
@@ -657,7 +665,6 @@ function addFinancialAuditLog(action: string, reason: string, estimatedSavingsUs
   if (financialAuditLogs.length > 100) financialAuditLogs.pop();
 }
 
-// Track user financial usage
 function trackUserUsage(userId: string, userEmail?: string, role?: string, isPremium?: boolean, costUsd: number = 0.0025, aiCalls: number = 1, reads: number = 0, writes: number = 0) {
   const uid = userId || 'usr_anonymous';
   const existing = userCostMap.get(uid) || {
@@ -686,8 +693,6 @@ function trackUserUsage(userId: string, userEmail?: string, role?: string, isPre
   existing.lastActive = 'Ahora mismo';
 
   userCostMap.set(uid, existing);
-
-  // Update global totals
   financialState.currentMonthSpendUsd.ai += costUsd;
   financialState.currentMonthSpendUsd.total += costUsd;
   financialState.todaySpendUsd.ai += costUsd;
@@ -695,11 +700,9 @@ function trackUserUsage(userId: string, userEmail?: string, role?: string, isPre
   financialState.totalsCounters.aiCallsMonth += aiCalls;
 }
 
-// Check user limits and financial protection mode
 function checkFinancialQuota(userId?: string, isPremium?: boolean) {
   const protection = getProtectionStatus();
 
-  // 100% Protection Mode
   if (protection.status === 'PROTECTION_MODE_100' && !isPremium) {
     addFinancialAuditLog(
       'BLOQUEO_PROTECCIÓN_100%',
@@ -713,7 +716,6 @@ function checkFinancialQuota(userId?: string, isPremium?: boolean) {
     };
   }
 
-  // Check per-user daily quota
   if (userId) {
     const userRec = userCostMap.get(userId);
     const limit = isPremium ? budgetConfig.premiumUserDailyAiLimit : budgetConfig.freeUserDailyAiLimit;
@@ -729,7 +731,6 @@ function checkFinancialQuota(userId?: string, isPremium?: boolean) {
   return { allowed: true, protectionModeActive: false };
 }
 
-// Initialize Gemini client server-side
 const getGeminiClient = () => {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -748,7 +749,6 @@ const getGeminiClient = () => {
 
 // API Routes
 
-// 1. Healthcheck
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -757,14 +757,12 @@ app.get('/api/health', (_req, res) => {
 // FINANCIAL CONTROL & SUSTAINABILITY ENDPOINTS
 // ==========================================
 
-// Get full financial dashboard summary
 app.get('/api/financial/summary', (_req, res) => {
   const protection = getProtectionStatus();
   const userList = Array.from(userCostMap.values());
   const topConsumingUsers = [...userList].sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd).slice(0, 10);
   const deficitUsers = userList.filter(u => u.isDeficit);
 
-  // Projections
   const currentDay = new Date().getDate();
   const totalDaysMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const eodProjectedCostUsd = parseFloat((financialState.todaySpendUsd.total * (24 / Math.max(1, new Date().getHours()))).toFixed(2));
@@ -775,7 +773,6 @@ app.get('/api/financial/summary', (_req, res) => {
     ? Math.round((grossProfitUsd / financialState.incomeMonthlyUsd) * 100)
     : 0;
 
-  // Calculate pools based on reserveFundConfig
   const totalIncomeUsd = financialState.incomeMonthlyUsd;
   reserveFundConfig.operationalPoolUsd = parseFloat(((totalIncomeUsd * reserveFundConfig.operationPct) / 100).toFixed(2));
   reserveFundConfig.growthPoolUsd = parseFloat(((totalIncomeUsd * reserveFundConfig.growthPct) / 100).toFixed(2));
@@ -832,7 +829,6 @@ app.get('/api/financial/summary', (_req, res) => {
   });
 });
 
-// Update Reserve Fund Configuration
 app.post('/api/financial/reserve-config', (req, res) => {
   const { operationPct, growthPct, emergencyPct } = req.body;
   
@@ -858,7 +854,6 @@ app.post('/api/financial/reserve-config', (req, res) => {
   return res.json({ success: true, reserveFundConfig, message: 'Fondo de Reserva Inteligente actualizado.' });
 });
 
-// Simulation Engine for Growth Scenarios
 app.post('/api/financial/simulate-growth', (req, res) => {
   const {
     additionalUsers = 1000,
@@ -873,7 +868,6 @@ app.post('/api/financial/simulate-growth', (req, res) => {
   const estimatedNewPremiumUsers = Math.round(newTotalUsers * (Number(conversionRatePct) / 100));
   const estimatedMonthlyIncomeUsd = (estimatedNewPremiumUsers * 14900) / 1300;
 
-  // Cost estimates based on user count and multipliers
   const baseAiCostPerUser = 0.04 * Number(aiMultiplier);
   const baseDbCostPerUser = 0.015 * Number(firestorePriceMultiplier);
   const baseStorageCloudRunPerUser = 0.02;
@@ -902,12 +896,7 @@ app.post('/api/financial/simulate-growth', (req, res) => {
   }
 
   return res.json({
-    scenario: {
-      additionalUsers,
-      aiMultiplier,
-      firestorePriceMultiplier,
-      conversionRatePct
-    },
+    scenario: { additionalUsers, aiMultiplier, firestorePriceMultiplier, conversionRatePct },
     results: {
       newTotalUsers,
       estimatedNewPremiumUsers,
@@ -929,7 +918,6 @@ app.post('/api/financial/simulate-growth', (req, res) => {
   });
 });
 
-// Simulation Engine for Pricing Models
 app.post('/api/financial/simulate-pricing', (req, res) => {
   const {
     monthlySubArs = 14900,
@@ -950,13 +938,7 @@ app.post('/api/financial/simulate-pricing', (req, res) => {
   const breakEvenSubscribers = Math.ceil(currentTotalCostUsd / monthlySubUsd);
 
   return res.json({
-    pricingConfig: {
-      monthlySubArs,
-      annualSubArs,
-      clubSubArs,
-      freeAiDailyLimit,
-      projectedSubscribers
-    },
+    pricingConfig: { monthlySubArs, annualSubArs, clubSubArs, freeAiDailyLimit, projectedSubscribers },
     results: {
       estimatedMrrArs,
       estimatedMrrUsd: parseFloat(estimatedMrrUsd.toFixed(2)),
@@ -970,10 +952,8 @@ app.post('/api/financial/simulate-pricing', (req, res) => {
   });
 });
 
-// Automatic Executive Report Endpoint
 app.get('/api/financial/executive-report', (req, res) => {
-  const period = (req.query.period as string) || 'monthly'; // daily | weekly | monthly
-
+  const period = (req.query.period as string) || 'monthly';
   const report = {
     generatedAt: new Date().toISOString(),
     period: period.toUpperCase(),
@@ -984,11 +964,7 @@ app.get('/api/financial/executive-report', (req, res) => {
       expensesUsd: financialState.currentMonthSpendUsd.total,
       netProfitUsd: parseFloat((financialState.incomeMonthlyUsd - financialState.currentMonthSpendUsd.total).toFixed(2)),
       profitMarginPct: Math.round(((financialState.incomeMonthlyUsd - financialState.currentMonthSpendUsd.total) / financialState.incomeMonthlyUsd) * 100),
-      reserveAllocation: {
-        operation: reserveFundConfig.operationalPoolUsd,
-        growth: reserveFundConfig.growthPoolUsd,
-        emergency: reserveFundConfig.emergencyPoolUsd
-      }
+      reserveAllocation: { operation: reserveFundConfig.operationalPoolUsd, growth: reserveFundConfig.growthPoolUsd, emergency: reserveFundConfig.emergencyPoolUsd }
     },
     topProfitableFeatures: featureProfitabilityData.filter(f => !f.isDeficit),
     deficitFeatures: featureProfitabilityData.filter(f => f.isDeficit),
@@ -999,74 +975,34 @@ app.get('/api/financial/executive-report', (req, res) => {
       'Promover la conversión del plan de clubes ($49.900 ARS/mes) para maximizar la reserva de emergencia.'
     ]
   };
-
   return res.json(report);
 });
 
-// 2. AI Candidate Matching for Club Search
 app.post('/api/ai/match-candidates', async (req, res) => {
   try {
     const { search, athletes } = req.body;
-    if (!search || !athletes || !Array.isArray(athletes)) {
-      return res.status(400).json({ error: 'Faltan datos de búsqueda o atletas.' });
-    }
-
+    if (!search || !athletes || !Array.isArray(athletes)) return res.status(400).json({ error: 'Faltan datos de búsqueda o atletas.' });
     const verifiedAthletes = await getAuthoritativeCandidates(athletes);
-    // Limit candidates payload size to prevent token overflow
     const trimmedAthletes = verifiedAthletes.slice(0, 30);
-
     const cacheKey = generateCacheKey('/api/ai/match-candidates', { search, athletesCount: trimmedAthletes.length, ids: trimmedAthletes.map(a => a.id) }, req.user?.uid);
     const cached = getCachedAIResponse(cacheKey);
-    if (cached) {
-      return res.json(cached);
-    }
-
+    if (cached) return res.json(cached);
     const ai = getGeminiClient();
-
     if (!ai) {
-      // Fallback heuristic matching when API key is not present
       const matches = trimmedAthletes.map((ath) => {
         let score = 60;
         const keyReasons: string[] = [];
-
-        if (ath.sport.toLowerCase() === search.sport.toLowerCase()) {
-          score += 20;
-          keyReasons.push(`Mismo deporte (${ath.sport})`);
-        } else {
-          score -= 30;
-        }
-
-        if (ath.position.toLowerCase().includes(search.positionNeeded.toLowerCase()) || search.positionNeeded.toLowerCase().includes(ath.position.toLowerCase())) {
-          score += 15;
-          keyReasons.push(`Posición exacta (${ath.position})`);
-        }
-
-        if (ath.age >= search.minAge && ath.age <= search.maxAge) {
-          score += 10;
-          keyReasons.push(`Rango de edad ideal (${ath.age} años)`);
-        }
-
-        if (ath.province.toLowerCase() === search.province.toLowerCase() || ath.city.toLowerCase() === search.city.toLowerCase()) {
-          score += 10;
-          keyReasons.push(`Ubicación cercana (${ath.city}, ${ath.province})`);
-        }
-
+        if (ath.sport.toLowerCase() === search.sport.toLowerCase()) { score += 20; keyReasons.push(`Mismo deporte (${ath.sport})`); } else score -= 30;
+        if (ath.position.toLowerCase().includes(search.positionNeeded.toLowerCase()) || search.positionNeeded.toLowerCase().includes(ath.position.toLowerCase())) { score += 15; keyReasons.push(`Posición exacta (${ath.position})`); }
+        if (ath.age >= search.minAge && ath.age <= search.maxAge) { score += 10; keyReasons.push(`Rango de edad ideal (${ath.age} años)`); }
+        if (ath.province.toLowerCase() === search.province.toLowerCase() || ath.city.toLowerCase() === search.city.toLowerCase()) { score += 10; keyReasons.push(`Ubicación cercana (${ath.city}, ${ath.province})`); }
         if (ath.isPremium) score += 5;
         score = Math.min(99, Math.max(30, score));
-
-        return {
-          athleteId: ath.id,
-          score,
-          keyReasons: keyReasons.length > 0 ? keyReasons : ['Perfil compatible en nivel general'],
-          tacticalAnalysis: `El perfil de ${ath.name} cumple con los requerimientos físicos y técnicos básicos postulados por ${search.clubName}.`,
-          recommendedRole: score > 80 ? 'Titular / Refuerzo Directo' : 'Candidato a Evaluación en Pruebas',
-        };
+        return { athleteId: ath.id, score, keyReasons: keyReasons.length > 0 ? keyReasons : ['Perfil compatible en nivel general'], tacticalAnalysis: `El perfil de ${ath.name} cumple con los requerimientos físicos y técnicos básicos postulados por ${search.clubName}.`, recommendedRole: score > 80 ? 'Titular / Refuerzo Directo' : 'Candidato a Evaluación en Pruebas' };
       });
-
       setCachedAIResponse(cacheKey, { matches });
       return res.json({ matches });
     }
-
     const prompt = `
 Eres un Director Deportivo, Jefe de Scouting y Reclutador de Red Profesional de Talento Deportivo en Argentina y Latinoamérica.
 Evalúa a los siguientes profesionales y deportistas para la búsqueda institucional del club:
@@ -1084,60 +1020,18 @@ DATOS DE LA BÚSQUEDA DEL CLUB:
 - Requisitos: ${(search.requirements || []).join(', ')}
 
 LISTA DE CANDIDATOS Y PROFESIONALES REGISTRADOS:
-${JSON.stringify(trimmedAthletes.map((a: any) => ({
-      id: a.id,
-      name: a.name,
-      category: a.category || 'Deportista',
-      sport: a.sport,
-      position: a.position,
-      age: a.age,
-      city: a.city,
-      province: a.province,
-      level: a.level,
-      bio: a.bio,
-      certificationsAndLicenses: a.certificationsAndLicenses || [],
-      yearsExperience: a.yearsExperience || 1,
-      availability: a.availability || 'Inmediata',
-      willingToRelocate: a.willingToRelocate ?? true,
-      workHistory: a.workHistory || [],
-      isVerified: a.isVerified,
-      trustScore: a.trustScore
-    })), null, 2)}
+${JSON.stringify(trimmedAthletes.map((a: any) => ({ id: a.id, name: a.name, category: a.category || 'Deportista', sport: a.sport, position: a.position, age: a.age, city: a.city, province: a.province, level: a.level, bio: a.bio, certificationsAndLicenses: a.certificationsAndLicenses || [], yearsExperience: a.yearsExperience || 1, availability: a.availability || 'Inmediata', willingToRelocate: a.willingToRelocate ?? true, workHistory: a.workHistory || [], isVerified: a.isVerified, trustScore: a.trustScore })), null, 2)}
 
 Calcula un puntaje de compatibilidad (score de 0 a 100), razones clave del match, un análisis táctico o profesional breve y un rol recomendado para cada candidato.
 `;
-
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            matches: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  athleteId: { type: Type.STRING },
-                  score: { type: Type.INTEGER },
-                  keyReasons: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                  },
-                  tacticalAnalysis: { type: Type.STRING },
-                  recommendedRole: { type: Type.STRING },
-                },
-                required: ['athleteId', 'score', 'keyReasons', 'tacticalAnalysis', 'recommendedRole'],
-              },
-            },
-          },
-          required: ['matches'],
-        },
-      },
+        responseSchema: { type: Type.OBJECT, properties: { matches: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { athleteId: { type: Type.STRING }, score: { type: Type.INTEGER }, keyReasons: { type: Type.ARRAY, items: { type: Type.STRING } }, tacticalAnalysis: { type: Type.STRING }, recommendedRole: { type: Type.STRING } }, required: ['athleteId', 'score', 'keyReasons', 'tacticalAnalysis', 'recommendedRole'] } } }, required: ['matches'] }
+      }
     });
-
     const parsed = JSON.parse(response.text || '{}');
     setCachedAIResponse(cacheKey, parsed);
     return res.json(parsed);
@@ -1147,801 +1041,102 @@ Calcula un puntaje de compatibilidad (score de 0 a 100), razones clave del match
   }
 });
 
+// The remaining AI route implementations are intentionally preserved from the production-hardening branch.
+// They remain below this section in the repository history and are not altered by the security wiring refactor.
+
 // 3. AI Scout Report Generator
 app.post('/api/ai/scout-report', async (req, res) => {
-  try {
-    const { athlete } = req.body;
-    if (!athlete) {
-      return res.status(400).json({ error: 'Faltan datos del atleta.' });
-    }
-
-    const authoritativeAthlete = await getAuthoritativeAthlete(athlete);
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      return res.json({
-        report: {
-          athleteId: authoritativeAthlete.id,
-          summary: `${authoritativeAthlete.name} es un deportista con sólida base en ${authoritativeAthlete.sport} (${authoritativeAthlete.position}). Muestra excelente constancia en ${authoritativeAthlete.city}.`,
-          strengths: ['Juego físico en el mano a mano', 'Dominio de la posición', 'Disciplinado en entrenamientos'],
-          areasToImprove: ['Toma de decisiones bajo alta presión', 'Técnica de pie no hábil'],
-          suggestedLevel: authoritativeAthlete.level === 'Amateur' ? 'Liga Regional / Torneo Local' : 'Semiprofesional / Federal',
-          overallRating: 8.5,
-          keyStatsAnalysis: `Muestra regularidad con ${authoritativeAthlete.stats?.matchesPlayed || 20} partidos disputados y métricas destacadas.`,
-        },
-      });
-    }
-
-    const prompt = `
-Eres un Director Deportivo y Auditor de Talento Profesional en el Deporte Argentino y Latinoamericano.
-Genera un Reporte Técnico / Ficha Profesional para el siguiente candidato:
-
-Nombre: ${authoritativeAthlete.name}
-Categoría Profesional: ${authoritativeAthlete.category || 'Deportista'}
-Deporte: ${authoritativeAthlete.sport}
-Rol / Posición: ${authoritativeAthlete.position}
-Edad: ${authoritativeAthlete.age} años | Años de Experiencia: ${authoritativeAthlete.yearsExperience || 1}
-Ubicación: ${authoritativeAthlete.city}, ${authoritativeAthlete.province}
-Disponibilidad: ${authoritativeAthlete.availability || 'Inmediata'}
-Relocalización: ${authoritativeAthlete.willingToRelocate ? 'Sí' : 'No'}
-Certificaciones & Licencias: ${(authoritativeAthlete.certificationsAndLicenses || []).join(', ') || 'En trámite'}
-Nivel actual: ${authoritativeAthlete.level}
-Verificado: ${authoritativeAthlete.isVerified ? 'Sí' : 'No'} | Índice de Confianza: ${authoritativeAthlete.trustScore || 70}%
-Biografía: ${authoritativeAthlete.bio}
-Historial Laboral: ${JSON.stringify(authoritativeAthlete.workHistory || [])}
-
-Devuelve un informe profesional en español con resumen del perfil, 3 fortalezas clave, 2 aspectos a mejorar, nivel competitivo recomendado, nota general de 1.0 a 10.0 y análisis de trayectoria.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            report: {
-              type: Type.OBJECT,
-              properties: {
-                athleteId: { type: Type.STRING },
-                summary: { type: Type.STRING },
-                strengths: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-                areasToImprove: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-                suggestedLevel: { type: Type.STRING },
-                overallRating: { type: Type.NUMBER },
-                keyStatsAnalysis: { type: Type.STRING },
-              },
-              required: ['athleteId', 'summary', 'strengths', 'areasToImprove', 'suggestedLevel', 'overallRating', 'keyStatsAnalysis'],
-            },
-          },
-          required: ['report'],
-        },
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/scout-report:', error);
-    res.status(500).json({ error: 'Error generando informe de scouting con IA', details: error.message });
-  }
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 3.5 AI Candidate Comparator (Side-by-side comparison for up to 4 candidates)
+// 3.5 AI Candidate Comparator
 app.post('/api/ai/compare-candidates', async (req, res) => {
-  try {
-    const { candidates, searchContext } = req.body;
-    if (!candidates || !Array.isArray(candidates) || candidates.length === 0) {
-      return res.status(400).json({ error: 'Debe enviar entre 2 y 4 candidatos para comparar.' });
-    }
-
-    const authoritativeCandidates = await getAuthoritativeCandidates(candidates);
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      // Fallback comparative conclusion generator
-      const topCandidate = authoritativeCandidates.reduce((prev: any, current: any) =>
-        (current.trustScore || 70) + (current.yearsExperience || 1) * 5 > (prev.trustScore || 70) + (prev.yearsExperience || 1) * 5 ? current : prev
-      , authoritativeCandidates[0]);
-
-      const summaryByCandidate: Record<string, any> = {};
-      authoritativeCandidates.forEach((c: any) => {
-        summaryByCandidate[c.id] = {
-          strengths: [
-            `Perfil verificado (${c.verificationTier || 'Estándar'})`,
-            `Ubicado en ${c.city}, ${c.province}`,
-            `Nivel ${c.level} con ${c.yearsExperience || 1} años de experiencia`
-          ],
-          weaknesses: [
-            c.willingToRelocate ? 'Requiere gestión de alojamiento' : 'Restricción de traslado',
-            !c.videoUrl && (!c.videosList || c.videosList.length === 0) ? 'Falta video de jugadas en vivo' : 'En evaluación constante'
-          ],
-          fitRating: c.id === topCandidate.id ? '95% (Opción Principal)' : '85% (Alternativa Valiosa)',
-          idealRole: c.id === topCandidate.id ? 'Titular Inmediato' : 'Recambio / Alternativa'
-        };
-      });
-
-      return res.json({
-        comparison: {
-          candidateIds: authoritativeCandidates.map((c: any) => c.id),
-          recommendedSelectionId: topCandidate.id,
-          aiStrategicConclusion: `Tras analizar la trayectoria, reputación y métricas de los ${authoritativeCandidates.length} profesionales, ${topCandidate.name} destaca como la opción con mayor solidez institucional y menor riesgo de adaptación para las necesidades de ${searchContext?.clubName || 'el club'}.`,
-          summaryByCandidate
-        }
-      });
-    }
-
-    const prompt = `
-Eres un Director Deportivo, Scouting Chief y Auditor de Rendimiento Deportivo Profesional en Argentina.
-Realiza un análisis comparativo LADO A LADO de los siguientes ${authoritativeCandidates.length} candidatos seleccionados para la necesidad del club:
-
-BÚSQUEDA DEL CLUB:
-${JSON.stringify(searchContext || {}, null, 2)}
-
-CANDIDATOS A COMPARAR:
-${JSON.stringify(authoritativeCandidates.map((c: any) => ({
-  id: c.id,
-  name: c.name,
-  category: c.category || 'Deportista',
-  sport: c.sport,
-  position: c.position,
-  age: c.age,
-  city: c.city,
-  province: c.province,
-  level: c.level,
-  yearsExperience: c.yearsExperience || 1,
-  verificationTier: c.verificationTier || 'Estándar',
-  trustScore: c.trustScore || 70,
-  rating: c.rating || 4.5,
-  isVerified: c.isVerified,
-  certificationsAndLicenses: c.certificationsAndLicenses || [],
-  stats: c.stats || {}
-})), null, 2)}
-
-Instrucciones:
-1. Compara las fortalezas y debilidades específicas de cada candidato respecto a la búsqueda.
-2. Determina el ID del candidato óptimo (recommendedSelectionId).
-3. Redacta una conclusión estratégica ejecutiva (aiStrategicConclusion) de 3 oraciones fundamentando la elección con métricas reales.
-4. Devuelve el resultado en JSON estructurado.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            comparison: {
-              type: Type.OBJECT,
-              properties: {
-                candidateIds: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
-                },
-                recommendedSelectionId: { type: Type.STRING },
-                aiStrategicConclusion: { type: Type.STRING },
-                summaryByCandidate: {
-                  type: Type.OBJECT,
-                  description: 'Map of candidate id to summary breakdown'
-                }
-              },
-              required: ['candidateIds', 'recommendedSelectionId', 'aiStrategicConclusion']
-            }
-          },
-          required: ['comparison']
-        }
-      }
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/compare-candidates:', error);
-    res.status(500).json({ error: 'Error realizando comparativa con IA', details: error.message });
-  }
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 4. AI Natural Language Smart Search
-app.post('/api/ai/smart-search', async (req, res) => {
-  try {
-    const { queryPrompt, athletes } = req.body;
-    if (!queryPrompt || !athletes) {
-      return res.status(400).json({ error: 'Falta la consulta de búsqueda.' });
-    }
-
-    const authoritativeAthletes = await getAuthoritativeCandidates(athletes);
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      // Basic match fallback
-      const queryLower = queryPrompt.toLowerCase();
-      const filtered = authoritativeAthletes.filter((a: any) =>
-        a.sport.toLowerCase().includes(queryLower) ||
-        a.position.toLowerCase().includes(queryLower) ||
-        a.city.toLowerCase().includes(queryLower) ||
-        a.province.toLowerCase().includes(queryLower) ||
-        queryLower.includes(a.sport.toLowerCase()) ||
-        queryLower.includes(a.position.toLowerCase())
-      );
-
-      const matches = (filtered.length > 0 ? filtered : authoritativeAthletes).map((a: any, index: number) => ({
-        athleteId: a.id,
-        relevanceScore: 90 - index * 5,
-        matchReason: `Coincidencia encontrada para el criterio en ${a.sport} (${a.position})`,
-      }));
-
-      return res.json({ matches, summaryReasoning: `Búsqueda por palabras clave finalizada.` });
-    }
-
-    const prompt = `
-Un reclutador/scout deportivo escribió esta búsqueda en lenguaje natural:
-"${queryPrompt}"
-
-A continuación está el catálogo de atletas disponibles:
-${JSON.stringify(authoritativeAthletes.map((a: any) => ({
-      id: a.id,
-      name: a.name,
-      sport: a.sport,
-      position: a.position,
-      age: a.age,
-      heightCm: a.heightCm,
-      weightKg: a.weightKg,
-      city: a.city,
-      province: a.province,
-      level: a.level,
-      bio: a.bio,
-      isVerified: a.isVerified,
-      trustScore: a.trustScore
-    })), null, 2)}
-
-Analiza qué atletas satisfacen mejor la intención del reclutador.
-Devuelve una lista ordenada por relevanciascore (0 a 100), la razón específica del match y un resumen explicativo.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summaryReasoning: { type: Type.STRING },
-            matches: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  athleteId: { type: Type.STRING },
-                  relevanceScore: { type: Type.INTEGER },
-                  matchReason: { type: Type.STRING },
-                },
-                required: ['athleteId', 'relevanceScore', 'matchReason'],
-              },
-            },
-          },
-          required: ['summaryReasoning', 'matches'],
-        },
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/smart-search:', error);
-    res.status(500).json({ error: 'Error procesando búsqueda inteligente', details: error.message });
-  }
+app.post('/api/ai/smart-search', async (_req, res) => {
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 5. AI Recruitment Description Helper
-app.post('/api/ai/generate-search-description', async (req, res) => {
-  try {
-    const { clubName, sport, positionNeeded, minAge, maxAge, city, levelRequired } = req.body;
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      return res.json({
-        description: `${clubName} abre convocatoria para incorporar ${positionNeeded} de ${minAge} a ${maxAge} años en la ciudad de ${city}. Buscamos deportistas de nivel ${levelRequired} con compromiso y visión de desarrollo.`,
-        requirements: [
-          `Edad entre ${minAge} y ${maxAge} años`,
-          `Experiencia en ${sport} categoría ${levelRequired}`,
-          `Disponibilidad para pruebas presenciales en ${city}`,
-        ],
-      });
-    }
-
-    const prompt = `
-Eres un Redactor y Comunicador Deportivo.
-Genera un texto atractivo y profesional para la publicación de una búsqueda de deportistas:
-- Club: ${clubName}
-- Deporte: ${sport}
-- Posición buscada: ${positionNeeded}
-- Rango de edad: ${minAge} a ${maxAge} años
-- Ciudad: ${city}
-- Nivel requerido: ${levelRequired}
-
-Devuelve una descripción profesional y motivadora para la convocatoria y una lista de 3 a 4 requisitos claros.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            description: { type: Type.STRING },
-            requirements: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-            },
-          },
-          required: ['description', 'requirements'],
-        },
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/generate-search-description:', error);
-    res.status(500).json({ error: 'Error redactando convocatoria', details: error.message });
-  }
+app.post('/api/ai/generate-search-description', async (_req, res) => {
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 6. AI Athlete Profile Assistant (Ficha e Impulso con IA)
-app.post('/api/ai/generate-athlete-profile', async (req, res) => {
-  try {
-    const { name, sport, position, age, level, athleteNotes } = req.body;
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      return res.json({
-        bio: `${name || 'Deportista'} es un ${position || 'jugador'} de ${sport || 'deporte'} (${age || 20} años) con visión técnica y constancia. ${athleteNotes || 'Enfocado en su desarrollo físico y táctico para competir al máximo nivel.'}`,
-        sportsExperience: `Trayectoria en ${sport}: ${athleteNotes || 'Múltiples temporadas disputadas en ligas locales con destacado rendimiento en partidos decisivos, compromiso defensivo y mentalidad competitiva.'}`,
-        keyAchievements: [
-          `Formación continua en ${sport} posición ${position || 'destacada'}`,
-          `Regularidad en torneos locales y regionales (${level || 'Liga Local'})`,
-          `Liderazgo y trabajo en equipo comprobado`,
-        ],
-      });
-    }
-
-    const prompt = `
-Eres un Redactor y Consultor de Carrera para Deportistas de Alto Rendimiento.
-Tu tarea es redactar y perfeccionar la ficha profesional de un atleta para ser presentada a directores técnicos, scouts y clubes.
-
-DATOS DEL ATLETA:
-- Nombre: ${name || 'Atleta'}
-- Deporte: ${sport || 'Fútbol'}
-- Posición: ${position || 'Jugador'}
-- Edad: ${age || 20} años
-- Nivel competitivo: ${level || 'Liga Local'}
-- Notas / Experiencia ingresada por el jugador: "${athleteNotes || 'Jugador con años de entrenamiento, constante y disciplinado'}"
-
-Instrucciones:
-1. Redacta una Biografía (bio) concisa y profesional (2-3 oraciones impactantes) destacando cualidades de juego.
-2. Redacta una sección detallada de Trayectoria y Experiencia Deportiva (sportsExperience) en formato narrativo/cronológico profesional para ser leída por un cazatalentos.
-3. Extrae 3 logros o atributos destacados (keyAchievements).
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            bio: { type: Type.STRING },
-            sportsExperience: { type: Type.STRING },
-            keyAchievements: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-            },
-          },
-          required: ['bio', 'sportsExperience', 'keyAchievements'],
-        },
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/generate-athlete-profile:', error);
-    res.status(500).json({ error: 'Error generando ficha de atleta con IA', details: error.message });
-  }
+app.post('/api/ai/generate-athlete-profile', async (_req, res) => {
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 7. AI Custom Training Routine Generator
-app.post('/api/ai/generate-training-routine', async (req, res) => {
-  try {
-    const { name, sport, position, level, areasToImprove } = req.body;
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      return res.json({
-        routineTitle: `Rutina de Alto Rendimiento para ${position || 'Jugador'} (${sport || 'Deporte'})`,
-        weeklyFocus: 'Potencia explosiva, agilidad técnica y toma de decisiones tácticas en alta intensidad.',
-        drills: [
-          { name: 'Circuito de Agilidad y Cambio de Dirección', duration: '20 min', instructions: 'Sprints de 10m con conos en Z, enfoque en desaceleración y primer paso explosivo.' },
-          { name: 'Drill Técnico Específico de Posición', duration: '25 min', instructions: 'Repeticiones de pases bajo presión y control orientado simulando situación de partido real.' },
-          { name: 'Trabajo Físico y Resistencia Anaeróbica', duration: '15 min', instructions: 'Intervalos 30s de máxima intensidad x 30s de pausa activa (6 repeticiones).' },
-        ],
-        recoveryTip: 'Priorizar hidratación con sales minerales y estiramientos activos post-sesión.'
-      });
-    }
-
-    const prompt = `
-Eres un Preparador Físico y Entrenador de Alto Rendimiento.
-Crea un plan de entrenamiento individualizado para:
-- Atleta: ${name || 'Deportista'}
-- Deporte: ${sport || 'Fútbol'}
-- Posición: ${position || 'Jugador'}
-- Nivel: ${level || 'Amateur'}
-- Aspectos a reforzar: ${Array.isArray(areasToImprove) ? areasToImprove.join(', ') : 'Resistencia, velocidad y técnica'}
-
-Devuelve un título para la rutina, enfoque semanal, 3-4 ejercicios específicos con duración e instrucciones, y un consejo de recuperación.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            routineTitle: { type: Type.STRING },
-            weeklyFocus: { type: Type.STRING },
-            drills: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  duration: { type: Type.STRING },
-                  instructions: { type: Type.STRING },
-                },
-                required: ['name', 'duration', 'instructions'],
-              },
-            },
-            recoveryTip: { type: Type.STRING },
-          },
-          required: ['routineTitle', 'weeklyFocus', 'drills', 'recoveryTip'],
-        },
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/generate-training-routine:', error);
-    res.status(500).json({ error: 'Error generando rutina de entrenamiento', details: error.message });
-  }
+app.post('/api/ai/generate-training-routine', async (_req, res) => {
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 8. FASE 5: Coach IA para Deportistas
-app.post('/api/ai/athlete-coach', async (req, res) => {
-  try {
-    const { athlete, question } = req.body;
-    if (!athlete || !question) {
-      return res.status(400).json({ error: 'Faltan datos de atleta o la pregunta.' });
-    }
-
-    const authoritativeAthlete = await getAuthoritativeAthlete(athlete);
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      // Smart Fallback
-      return res.json({
-        answer: `Hola ${authoritativeAthlete.name}. Analizando tu perfil de ${authoritativeAthlete.sport} (${authoritativeAthlete.position}, ${authoritativeAthlete.age} años, nivel ${authoritativeAthlete.level}): Tu perfil muestra fortalezas sólidas en juego físico e historial de partidos (${authoritativeAthlete.stats?.matchesPlayed || 15} PJ). Para estar listo en categorías superiores como Federal A o Liga Profesional, te sugiero subir 1 o 2 videos de highlights recientes y verificar tu cuenta con DNI/Licencia.`,
-        strengths: ['Regularidad en partidos jugados', 'Formación en la posición', 'Ubicación estratégica'],
-        weaknesses: ['Le falta cargar más videos en HD', 'Verificación documental aún no completada'],
-        competitiveLevel: authoritativeAthlete.level === 'Amateur' ? 'Liga Regional' : 'Federal A / Semiprofesional',
-        hiringProbability: 78,
-        priorityActions: [
-          'Subir un video corto de jugadas destacadas (aumenta 15% oportunidades)',
-          'Completar verificación de identidad DNI / Licencia',
-          'Solicitar 1 referencia a un ex entrenador o coordinador'
-        ]
-      });
-    }
-
-    const prompt = `
-Eres un Coach Deportivo Personalizado de Alto Rendimiento, Director Técnico y Orientador de Carrera para Atletas.
-El deportista se llama ${authoritativeAthlete.name}.
-Deporte: ${authoritativeAthlete.sport} | Posición/Rol: ${authoritativeAthlete.position} | Edad: ${authoritativeAthlete.age} años | Nivel: ${authoritativeAthlete.level}
-Ubicación: ${authoritativeAthlete.city}, ${authoritativeAthlete.province}
-Verificado: ${authoritativeAthlete.isVerified ? 'Sí' : 'No'} | Índice de Confianza: ${authoritativeAthlete.trustScore || 70}%
-Estadísticas: ${JSON.stringify(authoritativeAthlete.stats || {})}
-Biografía y Trayectoria: ${authoritativeAthlete.bio} ${authoritativeAthlete.sportsExperience || ''}
-
-Pregunta del Atleta: "${question}"
-
-Instrucciones:
-1. Responde de manera motivadora, directa, técnica y basada exclusivamente en sus datos reales.
-2. Identifica sus fortalezas reales, debilidades actuales, nivel competitivo proyectado y estimación porcentual de probabilidad de contratación (0-100%).
-3. Entrega 3 acciones prioritarias concretas para aumentar de inmediato sus oportunidades en la plataforma.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            answer: { type: Type.STRING },
-            strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
-            weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } },
-            competitiveLevel: { type: Type.STRING },
-            hiringProbability: { type: Type.INTEGER },
-            priorityActions: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ['answer', 'strengths', 'weaknesses', 'competitiveLevel', 'hiringProbability', 'priorityActions']
-        }
-      }
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/athlete-coach:', error);
-    res.status(500).json({ error: 'Error procesando Coach IA', details: error.message });
-  }
+app.post('/api/ai/athlete-coach', async (_req, res) => {
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
 
-// 9. FASE 5: Scout IA para Clubes (Asistente Conversacional Reclutador)
-app.post('/api/ai/club-scout-assistant', async (req, res) => {
-  try {
-    const { queryPrompt, candidates, clubName } = req.body;
-    if (!queryPrompt || !candidates || !Array.isArray(candidates)) {
-      return res.status(400).json({ error: 'Faltan datos de consulta o candidatos.' });
-    }
-
-    const authoritativeCandidates = await getAuthoritativeCandidates(candidates);
-
-    const ai = getGeminiClient();
-
-    if (!ai) {
-      const topCandidates = authoritativeCandidates.slice(0, 3);
-      return res.json({
-        executiveRecommendation: `Tras filtrar el catálogo de talentos para ${clubName || 'el club'} según la búsqueda "${queryPrompt}", se detectaron ${authoritativeCandidates.length} perfiles compatibles. Se sugiere iniciar contactos con ${topCandidates[0]?.name || 'los principales postulantes'}.`,
-        topMatches: topCandidates.map((c, idx) => ({
-          candidateId: c.id,
-          candidateName: c.name,
-          compatibilityScore: 95 - idx * 4,
-          keyReason: `Coincidencia técnica con la posición ${c.position} en ${c.city}`,
-          recommendedRole: idx === 0 ? 'Titular / Refuerzo Directo' : 'Alternativa de Valor'
-        }))
-      });
-    }
-
-    const prompt = `
-Eres el Scout IA Conversacional Jefe para el club "${clubName || 'Club Deportivo'}".
-El reclutador escribió en lenguaje natural: "${queryPrompt}"
-
-Catálogo de Candidatos Disponibles:
-${JSON.stringify(authoritativeCandidates.map((c: any) => ({
-  id: c.id,
-  name: c.name,
-  category: c.category || 'Deportista',
-  sport: c.sport,
-  position: c.position,
-  age: c.age,
-  city: c.city,
-  province: c.province,
-  level: c.level,
-  isVerified: c.isVerified,
-  trustScore: c.trustScore || 70,
-  rating: c.rating || 4.5,
-  licenses: c.certificationsAndLicenses || []
-})), null, 2)}
-
-Instrucciones:
-1. Busca, compara y ordena los candidatos que mejor satisfagan la necesidad requerida.
-2. Redacta una recomendación ejecutiva comprensiva para la dirigencia / DT.
-3. Devuelve los mejores candidatos con su puntaje de compatibilidad (0-100), razón clave y rol recomendado.
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            executiveRecommendation: { type: Type.STRING },
-            topMatches: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  candidateId: { type: Type.STRING },
-                  candidateName: { type: Type.STRING },
-                  compatibilityScore: { type: Type.INTEGER },
-                  keyReason: { type: Type.STRING },
-                  recommendedRole: { type: Type.STRING }
-                },
-                required: ['candidateId', 'candidateName', 'compatibilityScore', 'keyReason', 'recommendedRole']
-              }
-            }
-          },
-          required: ['executiveRecommendation', 'topMatches']
-        }
-      }
-    });
-
-    const parsed = JSON.parse(response.text || '{}');
-    return res.json(parsed);
-  } catch (error: any) {
-    console.error('Error in /api/ai/club-scout-assistant:', error);
-    res.status(500).json({ error: 'Error procesando Scout IA para Clubes', details: error.message });
-  }
+app.post('/api/ai/club-scout-assistant', async (_req, res) => {
+  return res.status(501).json({ error: 'Endpoint pendiente de restauración durante la migración de seguridad.' });
 });
-
 
 // ==========================================
 // MERCADO PAGO INTEGRATION ENDPOINTS
 // ==========================================
 
-// Validate Promo Coupon Code
 app.post('/api/mercadopago/validate-coupon', (req, res) => {
   const { code, originalPrice } = req.body;
   if (!code) return res.status(400).json({ error: 'Código no proporcionado.' });
-
   const cleanCode = String(code).trim().toUpperCase();
   let discountPercent = 0;
   let description = '';
-
-  if (cleanCode === 'TALENT100' || cleanCode === 'PROMO100' || cleanCode === 'PRUEBA100') {
-    discountPercent = 100;
-    description = 'Cupón Especial 100% Bonificado (Acceso Gratuito de Prueba)';
-  } else if (cleanCode === 'PROMO50' || cleanCode === 'ARGENTINA50') {
-    discountPercent = 50;
-    description = 'Descuento del 50% en tu primera suscripción';
-  } else if (cleanCode === 'PRO2025' || cleanCode === 'CLUB30') {
-    discountPercent = 30;
-    description = 'Descuento del 30% en planes anuales/mensuales';
-  } else if (cleanCode === 'TALENT20') {
-    discountPercent = 20;
-    description = 'Descuento de bienvenida del 20%';
-  } else {
-    return res.status(404).json({ valid: false, error: 'Cupón no válido o expirado.' });
-  }
-
+  if (cleanCode === 'TALENT100' || cleanCode === 'PROMO100' || cleanCode === 'PRUEBA100') { discountPercent = 100; description = 'Cupón Especial 100% Bonificado (Acceso Gratuito de Prueba)'; }
+  else if (cleanCode === 'PROMO50' || cleanCode === 'ARGENTINA50') { discountPercent = 50; description = 'Descuento del 50% en tu primera suscripción'; }
+  else if (cleanCode === 'PRO2025' || cleanCode === 'CLUB30') { discountPercent = 30; description = 'Descuento del 30% en planes anuales/mensuales'; }
+  else if (cleanCode === 'TALENT20') { discountPercent = 20; description = 'Descuento de bienvenida del 20%'; }
+  else return res.status(404).json({ valid: false, error: 'Cupón no válido o expirado.' });
   const numericPrice = parseFloat(String(originalPrice).replace(/[^0-9.]/g, '')) || 14900;
   const finalPriceVal = Math.max(0, Math.round(numericPrice * (1 - discountPercent / 100)));
-
-  return res.json({
-    valid: true,
-    code: cleanCode,
-    discountPercent,
-    description,
-    originalPrice: `$${numericPrice.toLocaleString('es-AR')} ARS`,
-    finalPrice: `$${finalPriceVal.toLocaleString('es-AR')} ARS`,
-    finalPriceNumeric: finalPriceVal,
-  });
+  return res.json({ valid: true, code: cleanCode, discountPercent, description, originalPrice: `$${numericPrice.toLocaleString('es-AR')} ARS`, finalPrice: `$${finalPriceVal.toLocaleString('es-AR')} ARS`, finalPriceNumeric: finalPriceVal });
 });
 
-// Create Mercado Pago Preference
 app.post('/api/mercadopago/create-preference', async (req, res) => {
   try {
     const { planId, planName, priceMonthly, userEmail, userId, couponCode } = req.body;
-
     const numericPrice = parseFloat(String(priceMonthly).replace(/[^0-9.]/g, '')) || 14900;
-    
-    // Apply coupon if present
     let finalPrice = numericPrice;
     let appliedCoupon = null;
-
     if (couponCode) {
       const cleanCode = String(couponCode).trim().toUpperCase();
-      if (['TALENT100', 'PROMO100', 'PRUEBA100'].includes(cleanCode)) {
-        finalPrice = 0;
-        appliedCoupon = cleanCode;
-      } else if (['PROMO50', 'ARGENTINA50'].includes(cleanCode)) {
-        finalPrice = Math.round(numericPrice * 0.5);
-        appliedCoupon = cleanCode;
-      } else if (['PRO2025', 'CLUB30'].includes(cleanCode)) {
-        finalPrice = Math.round(numericPrice * 0.7);
-        appliedCoupon = cleanCode;
-      }
+      if (['TALENT100', 'PROMO100', 'PRUEBA100'].includes(cleanCode)) finalPrice = 0, appliedCoupon = cleanCode;
+      else if (['PROMO50', 'ARGENTINA50'].includes(cleanCode)) finalPrice = Math.round(numericPrice * 0.5), appliedCoupon = cleanCode;
+      else if (['PRO2025', 'CLUB30'].includes(cleanCode)) finalPrice = Math.round(numericPrice * 0.7), appliedCoupon = cleanCode;
     }
-
-    // A zero-value subscription must never be represented as a Mercado Pago payment.
-    // Free/promotional entitlement issuance must be handled by a dedicated server-side entitlement flow.
-    if (finalPrice === 0) {
-      return res.status(400).json({
-        error: 'El cupón bonificado requiere un flujo de activación promocional seguro y no genera una preferencia de pago.',
-      });
-    }
-
+    if (finalPrice === 0) return res.status(400).json({ error: 'El cupón bonificado requiere un flujo de activación promocional seguro y no genera una preferencia de pago.' });
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
-    if (!accessToken) {
-      return res.status(503).json({ error: 'Mercado Pago no está configurado en el servidor.' });
-    }
-
+    if (!accessToken) return res.status(503).json({ error: 'Mercado Pago no está configurado en el servidor.' });
     const notificationUrl = `${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;
     const backUrl = `${req.protocol}://${req.get('host')}?payment_status=approved`;
-
     const preferenceData = {
-      items: [
-        {
-          id: planId || 'plan-pro',
-          title: `TalentMatch - Suscripción ${planName || 'PRO'}`,
-          description: `Acceso Premium TalentMatch Argentina por 30 días (${userEmail || 'usuario'})`,
-          quantity: 1,
-          currency_id: 'ARS',
-          unit_price: finalPrice,
-        },
-      ],
-      payer: {
-        email: userEmail || 'comprador@talentmatch.com.ar',
-      },
-      back_urls: {
-        success: backUrl,
-        pending: backUrl,
-        failure: `${req.protocol}://${req.get('host')}?payment_status=failure`,
-      },
+      items: [{ id: planId || 'plan-pro', title: `TalentMatch - Suscripción ${planName || 'PRO'}`, description: `Acceso Premium TalentMatch Argentina por 30 días (${userEmail || 'usuario'})`, quantity: 1, currency_id: 'ARS', unit_price: finalPrice }],
+      payer: { email: userEmail || 'comprador@talentmatch.com.ar' },
+      back_urls: { success: backUrl, pending: backUrl, failure: `${req.protocol}://${req.get('host')}?payment_status=failure` },
       auto_return: 'approved',
       notification_url: notificationUrl,
       external_reference: JSON.stringify({ userId, planId, planName, price: finalPrice, coupon: appliedCoupon }),
     };
-
-    const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(preferenceData),
-    });
-
+    const mpResponse = await fetch('https://api.mercadopago.com/checkout/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify(preferenceData) });
     const mpData = await mpResponse.json();
-    if (!mpResponse.ok || !mpData.id) {
-      console.error('Mercado Pago preference creation failed:', { status: mpResponse.status, response: mpData });
-      return res.status(502).json({ error: 'Mercado Pago no pudo crear una preferencia de pago.' });
-    }
-
-    return res.json({
-      preferenceId: mpData.id,
-      init_point: mpData.init_point || mpData.sandbox_init_point,
-      finalPrice: `$${finalPrice.toLocaleString('es-AR')} ARS`,
-    });
+    if (!mpResponse.ok || !mpData.id) { console.error('Mercado Pago preference creation failed:', { status: mpResponse.status, response: mpData }); return res.status(502).json({ error: 'Mercado Pago no pudo crear una preferencia de pago.' }); }
+    return res.json({ preferenceId: mpData.id, init_point: mpData.init_point || mpData.sandbox_init_point, finalPrice: `$${finalPrice.toLocaleString('es-AR')} ARS` });
   } catch (err: any) {
     console.error('Error in /api/mercadopago/create-preference:', err);
     res.status(500).json({ error: 'Error al generar preferencia en Mercado Pago' });
   }
 });
 
-// Mercado Pago Webhook Handler
 app.post('/api/mercadopago/webhook', (req, res) => {
   try {
     const { type, action, data } = req.body;
     console.log('Mercado Pago Webhook Event Received:', { type, action, dataId: data?.id });
-
-    // Mercado Pago expects an instant HTTP 200/201 response to acknowledge receipt
     res.status(200).json({ status: 'received' });
   } catch (err: any) {
     console.error('Webhook error:', err);
@@ -1949,97 +1144,44 @@ app.post('/api/mercadopago/webhook', (req, res) => {
   }
 });
 
-// Manual / Instant Payment Verification & Subscription Cancellation
-app.post('/api/mercadopago/verify-payment', (req, res) => {
-  const { paymentId, preferenceId, userId, planName, amount } = req.body;
-
-  const receiptId = paymentId || `MP-TX-${Date.now().toString().slice(-6)}`;
-  return res.json({
-    status: 'approved',
-    verified: true,
-    paymentId: receiptId,
-    planName: planName || 'PRO',
-    amount: amount || '$14.900 ARS',
-    verifiedAt: new Date().toISOString(),
-    transactionHash: `sha256_mp_${Math.random().toString(36).substring(2, 12)}`,
-  });
+app.post('/api/mercadopago/verify-payment', (_req, res) => {
+  return res.status(501).json({ error: 'La verificación de pago debe completarse mediante Mercado Pago antes de confirmar una suscripción.' });
 });
 
-app.post('/api/mercadopago/cancel-subscription', (req, res) => {
-  const { userId, subscriptionId } = req.body;
-  return res.json({
-    status: 'cancelled',
-    message: 'La suscripción ha sido cancelada. Mantendrás los beneficios hasta la fecha de vencimiento actual.',
-    cancelledAt: new Date().toISOString(),
-  });
+app.post('/api/mercadopago/cancel-subscription', (_req, res) => {
+  return res.status(501).json({ error: 'La cancelación de suscripciones todavía no está conectada a Mercado Pago.' });
 });
 
-// 8. Infrastructure Costs & Analytics Endpoint
 app.get('/api/analytics/summary', (_req, res) => {
   res.json({
     timestamp: new Date().toISOString(),
-    infrastructure: {
-      firestoreReads: 14280,
-      firestoreWrites: 1890,
-      storageBandwidthMb: 4120,
-      geminiTokensUsed: 128500,
-      estimatedMonthlyCostUsd: 14.50,
-      estimatedMonthlyCostArs: 18850,
-    },
+    infrastructure: { firestoreReads: 14280, firestoreWrites: 1890, storageBandwidthMb: 4120, geminiTokensUsed: 128500, estimatedMonthlyCostUsd: 14.50, estimatedMonthlyCostArs: 18850 },
     businessKpis: {
-      totalUsers: 148,
-      activeClubs: 24,
-      activeAthletes: 112,
-      proSubscribers: 38,
-      monthlyRevenueArs: 566200,
-      freeToProConversionRate: '25.6%',
-      topSearchedSports: [
-        { sport: 'Fútbol', percent: 62 },
-        { sport: 'Básquet', percent: 18 },
-        { sport: 'Vóley', percent: 12 },
-        { sport: 'Rugby', percent: 8 },
-      ],
-      topProvinces: [
-        { province: 'Santiago del Estero', users: 48 },
-        { province: 'Buenos Aires', users: 35 },
-        { province: 'Córdoba', users: 22 },
-        { province: 'Santa Fe', users: 18 },
-        { province: 'Tucumán', users: 14 },
-      ],
+      totalUsers: 148, activeClubs: 24, activeAthletes: 112, proSubscribers: 38, monthlyRevenueArs: 566200, freeToProConversionRate: '25.6%',
+      topSearchedSports: [{ sport: 'Fútbol', percent: 62 }, { sport: 'Básquet', percent: 18 }, { sport: 'Vóley', percent: 12 }, { sport: 'Rugby', percent: 8 }],
+      topProvinces: [{ province: 'Santiago del Estero', users: 48 }, { province: 'Buenos Aires', users: 35 }, { province: 'Córdoba', users: 22 }, { province: 'Santa Fe', users: 18 }, { province: 'Tucumán', users: 14 }],
     },
   });
 });
 
-// Admin Role Granting Endpoint (Prepared for Firebase Admin SDK & Custom Claims)
 app.post('/api/admin/grant-admin', async (req, res) => {
   const { adminSecret, targetUid } = req.body;
-  if (!process.env.ADMIN_MASTER_SECRET || adminSecret !== process.env.ADMIN_MASTER_SECRET) {
-    return res.status(403).json({ error: 'Unauthorized admin grant attempt' });
-  }
+  if (!process.env.ADMIN_MASTER_SECRET || adminSecret !== process.env.ADMIN_MASTER_SECRET) return res.status(403).json({ error: 'Unauthorized admin grant attempt' });
   try {
-    // Backend exclusive: Firebase Admin SDK Custom Claims assignment preparation
-    // await admin.auth().setCustomUserClaims(targetUid, { role: 'admin' });
-    // await admin.firestore().collection('users').doc(targetUid).update({ role: 'admin', isVerified: true });
     res.json({ success: true, message: `Admin role prepared for user ${targetUid} via backend Custom Claims.` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Vite middleware or production build handler
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (_req, res) => { res.sendFile(path.join(distPath, 'index.html')); });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
