@@ -14,7 +14,7 @@ const COUPON_DISCOUNTS = new Map<string, number>([
   ['CLUB30', 30],
 ]);
 
-function calculateCouponPrice(basePrice: number, couponCode?: string | null): { finalPrice: number; coupon: string | null; discountPercent: number } {
+export function calculateCouponPrice(basePrice: number, couponCode?: string | null): { finalPrice: number; coupon: string | null; discountPercent: number } {
   const coupon = String(couponCode || '').trim().toUpperCase();
   if (!coupon) return { finalPrice: basePrice, coupon: null, discountPercent: 0 };
   const discountPercent = COUPON_DISCOUNTS.get(coupon);
@@ -22,7 +22,7 @@ function calculateCouponPrice(basePrice: number, couponCode?: string | null): { 
   return { finalPrice: Math.max(0, Math.round(basePrice * (1 - discountPercent / 100))), coupon, discountPercent };
 }
 
-function resolveCanonicalBasePrice(finalPrice: number, couponCode?: string | null): number | null {
+export function resolveCanonicalBasePrice(finalPrice: number, couponCode?: string | null): number | null {
   const coupon = String(couponCode || '').trim().toUpperCase();
   if (!coupon) return ALLOWED_PLAN_PRICES_ARS.has(finalPrice) ? finalPrice : null;
   for (const basePrice of ALLOWED_PLAN_PRICES_ARS) {
