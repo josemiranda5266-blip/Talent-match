@@ -1,0 +1,113 @@
+import * as admin from 'firebase-admin';
+
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+const db = admin.firestore();
+const BATCH_SIZE = 450;
+
+type SourceDefinition = {
+  source: 'searches' | 'teams' | 'tournaments';
+  target: 'publicSearches' | 'publicTeams' | 'publicTournaments';
+  fields: readonly string[];
+};
+
+const SOURCES: SourceDefinition[] = [
+  {
+    source: 'searches',
+    target: 'publicSearches',
+    fields: [
+      'clubName', 'clubLogo', 'title', 'sport', 'categoryNeeded', 'positionNeeded',
+      'minAge', 'maxAge', 'city', 'province', 'levelRequired', 'trialDate', 'trialTime',
+      'locationDetails', 'description', 'requirements', 'salaryOrRemuneration',
+      'isFeatured', 'postedAt', 'applicantCount', 'status',
+    ],
+  },
+  {
+    source: 'teams',
+    target: 'publicTeams',
+    fields: [
+      'name', 'category', 'sport', 'logoUrl', 'city', 'province', 'address', 'lat', 'lng',
+      'description', 'schedule', 'contactWhatsApp', 'contactInstagram',
+      'lookingForPlayers', 'lookingForFriendlies', 'isFreeListing', 'isVerified',
+      'createdAt', 'memberCount',
+    ],
+  },
+  {
+    source: 'tournaments',
+    target: 'publicTournaments',
+    fields: [
+      'title', 'organizerName', 'sport', 'category', 'province', 'city', 'venueName',
+      'startDate', 'endDate', 'description', 'prizes', 'registrationFee', 'registrationLink',
+      'contactWhatsApp', 'contactInstagram', 'contactEmail', 'bannerImage',
+      'isVerifiedOrganizer', 'createdAt', 'status',
+    ],
+  },
+];
+
+function sanitize(data: FirebaseFirestore.DocumentData, fields: readonly string[]) {
+  const result: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (data[field] !== undefined) result[field] = data[field];
+  }
+  return result;
+}
+
+async function syncSource(definition: SourceDefinition) {
+  const [sourceSnapshot, targetSnapshot] = await Promise.all([
+    db.collection(definition.source).get(),
+    db.collection(definition.target).get(),
+  ]);
+
+  const sourceIds = new Set(sourceSnapshot.docs.map((document) => document.id));
+
+  for (let offset = 0; offset < sourceSnapshot.docs.length; offset += BATCH_SIZE) {
+    const batch = db.batch();
+    const chunk = sourceSnapshot.docs.slice(offset, offset + BATCH_SIZE);
+
+    for (const sourceDoc of chunk) {
+      batch.set(
+        db.collection(definition.target).doc(sourceDoc.id),
+        {
+          ...sanitize(sourceDoc.data(), definition.fields),
+          published: true,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+
+    if (chunk.length > 0) await batch.commit();
+  }
+
+  for (let offset = 0; offset < targetSnapshot.docs.length; offset += BATCH_SIZE) {
+    const batch = db.batch();
+    const chunk = targetSnapshot.docs.slice(offset, offset + BATCH_SIZE);
+    let deletes = 0;
+
+    for (const targetDoc of chunk) {
+      if (!sourceIds.has(targetDoc.id)) {
+        batch.delete(targetDoc.ref);
+        deletes += 1;
+      }
+    }
+
+    if (deletes > 0) await batch.commit();
+  }
+
+  console.log(
+    `${definition.source} -> ${definition.target}: synchronized ${sourceSnapshot.size}; stale projections removed where necessary.`,
+  );
+}
+
+async function main() {
+  for (const definition of SOURCES) {
+    await syncSource(definition);
+  }
+}
+
+main().catch((error) => {
+  console.error('Public discovery projection sync failed:', error);
+  process.exitCode = 1;
+});
