@@ -1324,7 +1324,7 @@ export const AdminPanelView: React.FC = () => {
 
                   <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => handleSuspendAccount(alert.targetUserId, alert.targetUserName)}
+                      onClick={() => { if (alert.targetUserId) handleSuspendAccount(alert.targetUserId, alert.targetUserName || 'Usuario'); }}
                       className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 font-bold text-xs uppercase rounded-xl"
                     >
                       Suspender
