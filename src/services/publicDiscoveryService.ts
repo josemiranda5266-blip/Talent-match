@@ -17,7 +17,9 @@ export interface AthleteDiscoveryFilters {
 export async function fetchPublicAthletes(filters?: AthleteDiscoveryFilters): Promise<Athlete[]> {
   try {
     const snapshot = await getDocs(collection(db, 'publicAthletes'));
-    let list: Athlete[] = snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as Athlete));
+    let list: Athlete[] = snapshot.docs
+      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
+      .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as Athlete));
     list = list.filter((athlete) => athlete.availableForTrials !== false);
     return filterAthletes(list, filters);
   } catch (error) {
@@ -30,7 +32,9 @@ export async function fetchPublicAthletes(filters?: AthleteDiscoveryFilters): Pr
 export async function fetchPublicClubSearches(): Promise<ClubSearch[]> {
   try {
     const snapshot = await getDocs(collection(db, 'publicSearches'));
-    return snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as ClubSearch));
+    return snapshot.docs
+      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
+      .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as ClubSearch));
   } catch (error) {
     console.error('Error fetching public club searches:', error);
     if (isDemoMode()) return [...INITIAL_SEARCHES];
@@ -41,7 +45,9 @@ export async function fetchPublicClubSearches(): Promise<ClubSearch[]> {
 export async function fetchPublicTeams(): Promise<FreeTeamProfile[]> {
   try {
     const snapshot = await getDocs(collection(db, 'publicTeams'));
-    return snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as FreeTeamProfile));
+    return snapshot.docs
+      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
+      .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as FreeTeamProfile));
   } catch (error) {
     console.error('Error fetching public teams:', error);
     if (isDemoMode()) return [...INITIAL_FREE_TEAMS];
@@ -52,7 +58,9 @@ export async function fetchPublicTeams(): Promise<FreeTeamProfile[]> {
 export async function fetchPublicTournaments(): Promise<Tournament[]> {
   try {
     const snapshot = await getDocs(collection(db, 'publicTournaments'));
-    return snapshot.docs.map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as Tournament));
+    return snapshot.docs
+      .filter((snapshotDoc) => snapshotDoc.data().published !== false)
+      .map((snapshotDoc) => ({ id: snapshotDoc.id, ...snapshotDoc.data() } as Tournament));
   } catch (error) {
     console.error('Error fetching public tournaments:', error);
     if (isDemoMode()) return [...INITIAL_TOURNAMENTS];
