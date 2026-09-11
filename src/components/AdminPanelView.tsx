@@ -569,7 +569,7 @@ export const AdminPanelView: React.FC = () => {
         <div className="bg-[#161618] p-4 rounded-2xl border border-white/10 space-y-1">
           <span className="text-[10px] text-white/40 uppercase block font-bold">Denuncias Abiertas</span>
           <strong className="text-lg sm:text-xl font-black text-red-400 font-mono">
-            {reports.filter(r => r.status === 'open').length}
+            {reports.filter(r => r.status === 'pending').length}
           </strong>
         </div>
       </div>
@@ -683,7 +683,7 @@ export const AdminPanelView: React.FC = () => {
               : 'bg-[#161618] text-white/60 hover:text-white border border-white/10'
           }`}
         >
-          <AlertTriangle className="w-4 h-4 text-amber-400" /> Antifraude & Spam ({fraudAlerts.filter(f => f.status === 'detected' || f.status === 'under_review').length})
+          <AlertTriangle className="w-4 h-4 text-amber-400" /> Antifraude & Spam ({fraudAlerts.filter(f => f.status === 'active' || f.status === 'investigating').length})
         </button>
 
         <button
@@ -694,7 +694,7 @@ export const AdminPanelView: React.FC = () => {
               : 'bg-[#161618] text-white/60 hover:text-white border border-white/10'
           }`}
         >
-          <ShieldAlert className="w-4 h-4" /> Moderación & Denuncias ({reports.filter(r => r.status === 'open' || r.status === 'pending').length})
+          <ShieldAlert className="w-4 h-4" /> Moderación & Denuncias ({reports.filter(r => r.status === 'pending' || r.status === 'investigating').length})
         </button>
 
         <button
@@ -1232,7 +1232,7 @@ export const AdminPanelView: React.FC = () => {
                         </span>
                       </div>
                       <p className="text-xs text-white/70 mt-1">
-                        <strong>Tipo de Documento:</strong> {req.documentType || 'DNI Frente / Dorso'}
+                        <strong>Tipo de Documento:</strong> {req.dniNumber || 'DNI / documentación'}
                       </p>
                       {req.notes && (
                         <p className="text-xs text-white/50 italic mt-0.5">
@@ -1242,9 +1242,9 @@ export const AdminPanelView: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      {req.documentUrl && (
+                      {req.dniDocumentUrl && (
                         <a
-                          href={req.documentUrl}
+                          href={req.dniDocumentUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl flex items-center gap-1"
@@ -1287,7 +1287,7 @@ export const AdminPanelView: React.FC = () => {
               </p>
             </div>
             <span className="px-3 py-1 bg-amber-500/20 text-amber-400 border border-amber-500/40 rounded-full font-mono text-xs font-bold">
-              {fraudAlerts.filter(f => f.status === 'detected' || f.status === 'under_review').length} alertas activas
+              {fraudAlerts.filter(f => f.status === 'active' || f.status === 'investigating').length} alertas activas
             </span>
           </div>
 
@@ -1353,7 +1353,7 @@ export const AdminPanelView: React.FC = () => {
               Denuncias Recibidas de la Comunidad
             </h3>
 
-            {reports.filter(r => r.status === 'open' || r.status === 'pending').length === 0 ? (
+            {reports.filter(r => r.status === 'pending' || r.status === 'investigating').length === 0 ? (
               <div className="bg-[#161618] p-8 rounded-2xl border border-white/10 text-center space-y-2">
                 <ShieldCheck className="w-10 h-10 text-[#00ff41] mx-auto" />
                 <h3 className="text-sm font-black text-white uppercase">Sin denuncias pendientes</h3>
@@ -1361,7 +1361,7 @@ export const AdminPanelView: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {reports.filter(r => r.status === 'open' || r.status === 'pending').map((rep) => (
+                {reports.filter(r => r.status === 'pending' || r.status === 'investigating').map((rep) => (
                   <div key={rep.id} className="bg-[#161618] p-5 rounded-2xl border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
@@ -1419,7 +1419,7 @@ export const AdminPanelView: React.FC = () => {
                   <div key={appeal.id} className="bg-[#161618] p-5 rounded-2xl border border-white/10 flex items-center justify-between gap-4">
                     <div>
                       <h4 className="text-sm font-bold text-white">{appeal.userName}</h4>
-                      <p className="text-xs text-white/70 italic mt-0.5">"{appeal.appealText}"</p>
+                      <p className="text-xs text-white/70 italic mt-0.5">"{appeal.appealMessage}"</p>
                       <span className="text-[10px] text-cyan-400 font-mono block mt-1">Estado: {appeal.status}</span>
                     </div>
 
