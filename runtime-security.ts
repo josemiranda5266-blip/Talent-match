@@ -31,6 +31,11 @@ const FREE_AI_DAILY_LIMIT = 5;
 const PREMIUM_AI_DAILY_LIMIT = 100;
 const ENTITLEMENT_CACHE_TTL_MS = 5 * 60 * 1000;
 
+export function invalidatePremiumEntitlement(uid: string): void {
+  const normalizedUid = String(uid || '').trim();
+  if (normalizedUid) entitlementCache.delete(normalizedUid);
+}
+
 async function resolvePremiumEntitlement(uid: string): Promise<boolean> {
   const cached = entitlementCache.get(uid);
   if (cached && cached.expiresAt > Date.now()) return cached.isPremium;
