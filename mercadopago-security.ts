@@ -88,13 +88,10 @@ export async function recordWebhookIdempotency(req: any, res: any, next: any) {
   const eventId = String(req.body?.id || `${req.body?.type || 'unknown'}:${req.body?.action || 'unknown'}:${req.body?.data?.id || 'unknown'}`);
   const ref = db.collection('mercadopagoWebhookEvents').doc(crypto.createHash('sha256').update(eventId).digest('hex'));
   try {
-    const result = await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(ref);
-      if (snapshot.exists) return false;
-      transaction.create(ref, { eventId, type: req.body?.type || null, action: req.body?.action || null, dataId: req.body?.data?.id || null, receivedAt: FieldValue.serverTimestamp() });
-      return true;
-    });
-    if (!result) return res.status(200).json({ status: 'already_processed' });
+    const snapshot = await ref.get();
+    if (snapshot.exists && snapshot.data()?.processedAt) return res.status(200).json({ status: 'already_processed' });
+    if (!snapshot.exists) await ref.create({ eventId, type: req.body?.type || null, action: req.body?.action || null, dataId: req.body?.data?.id || null, receivedAt: FieldValue.serverTimestamp() });
+    req.mercadoPagoWebhookEventRef = ref;
     return next();
   } catch (error) {
     console.error('Mercado Pago webhook idempotency failure:', error);

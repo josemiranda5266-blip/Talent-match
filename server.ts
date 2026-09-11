@@ -154,8 +154,43 @@ app.post('/api/ai/club-scout-assistant',async(req,res)=>{try{const{queryPrompt,c
 
 app.post('/api/mercadopago/validate-coupon',(req,res)=>{const{code,originalPrice}=req.body;if(!code)return res.status(400).json({error:'Código no proporcionado.'});const cleanCode=String(code).trim().toUpperCase();let discountPercent=0;let description='';if(['TALENT100','PROMO100','PRUEBA100'].includes(cleanCode)){discountPercent=100;description='Cupón Especial 100% Bonificado (Acceso Gratuito de Prueba)';}else if(['PROMO50','ARGENTINA50'].includes(cleanCode)){discountPercent=50;description='Descuento del 50% en tu primera suscripción';}else if(['PRO2025','CLUB30'].includes(cleanCode)){discountPercent=30;description='Descuento del 30% en planes anuales/mensuales';}else if(cleanCode==='TALENT20'){discountPercent=20;description='Descuento de bienvenida del 20%';}else return res.status(404).json({valid:false,error:'Cupón no válido o expirado.'});const numericPrice=parseFloat(String(originalPrice).replace(/[^0-9.]/g,''))||14900;const finalPriceVal=Math.max(0,Math.round(numericPrice*(1-discountPercent/100)));res.json({valid:true,code:cleanCode,discountPercent,description,originalPrice:`$${numericPrice.toLocaleString('es-AR')} ARS`,finalPrice:`$${finalPriceVal.toLocaleString('es-AR')} ARS`,finalPriceNumeric:finalPriceVal});});
 app.post('/api/mercadopago/create-preference',async(req,res)=>{try{const{planId,planName,priceMonthly,userEmail,userId,couponCode}=req.body;const numericPrice=parseFloat(String(priceMonthly).replace(/[^0-9.]/g,''))||14900;let finalPrice=numericPrice;let appliedCoupon=null;if(couponCode){const c=String(couponCode).trim().toUpperCase();if(['TALENT100','PROMO100','PRUEBA100'].includes(c)){finalPrice=0;appliedCoupon=c;}else if(['PROMO50','ARGENTINA50'].includes(c)){finalPrice=Math.round(numericPrice*.5);appliedCoupon=c;}else if(['PRO2025','CLUB30'].includes(c)){finalPrice=Math.round(numericPrice*.7);appliedCoupon=c;}}if(finalPrice===0)return res.status(400).json({error:'El cupón bonificado requiere un flujo de activación promocional seguro y no genera una preferencia de pago.'});const accessToken=process.env.MERCADOPAGO_ACCESS_TOKEN;if(!accessToken)return res.status(503).json({error:'Mercado Pago no está configurado en el servidor.'});const notificationUrl=`${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;const backUrl=`${req.protocol}://${req.get('host')}?payment_status=approved`;const preferenceData={items:[{id:planId||'plan-pro',title:`TalentMatch - Suscripción ${planName||'PRO'}`,description:`Acceso Premium TalentMatch Argentina por 30 días (${userEmail||'usuario'})`,quantity:1,currency_id:'ARS',unit_price:finalPrice}],payer:{email:userEmail||'comprador@talentmatch.com.ar'},back_urls:{success:backUrl,pending:backUrl,failure:`${req.protocol}://${req.get('host')}?payment_status=failure`},auto_return:'approved',notification_url:notificationUrl,external_reference:JSON.stringify({userId,planId,planName,price:finalPrice,coupon:appliedCoupon})};const mpResponse=await fetch('https://api.mercadopago.com/checkout/preferences',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify(preferenceData)});const mpData=await mpResponse.json();if(!mpResponse.ok||!mpData.id)return res.status(502).json({error:'Mercado Pago no pudo crear una preferencia de pago.'});return res.json({preferenceId:mpData.id,init_point:mpData.init_point||mpData.sandbox_init_point,finalPrice:`$${finalPrice.toLocaleString('es-AR')} ARS`});}catch(err:any){console.error('Error in /api/mercadopago/create-preference:',err);return res.status(500).json({error:'Error al generar preferencia en Mercado Pago'});}});
-app.post('/api/mercadopago/webhook',(req,res)=>{console.log('Mercado Pago Webhook Event Received:',{type:req.body?.type,action:req.body?.action,dataId:req.body?.data?.id});return res.status(200).json({status:'received'});});
-app.post('/api/mercadopago/verify-payment',(_req,res)=>res.status(501).json({error:'La verificación de pago debe completarse mediante Mercado Pago antes de confirmar una suscripción.'}));
+app.post('/api/mercadopago/webhook',async(req,res)=>{
+  try {
+    const paymentId=String(req.body?.data?.id||req.query?.['data.id']||'').trim();
+    const accessToken=process.env.MERCADOPAGO_ACCESS_TOKEN;
+    if(!paymentId||!accessToken)return res.status(400).json({error:'Notificación de pago incompleta.'});
+    const response=await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`,{headers:{Authorization:`Bearer ${accessToken}`}});
+    if(!response.ok)return res.status(502).json({error:'No se pudo verificar el pago con Mercado Pago.'});
+    const payment=await response.json();
+    const externalReference=String(payment.external_reference||'');
+    let reference:any={};
+    try{reference=JSON.parse(externalReference);}catch{reference={};}
+    const uid=String(reference.userId||'');
+    const transactionAmount=Number(payment.transaction_amount);
+    const referencedPrice=Number(reference.price);
+    const coupon=String(reference.coupon||'').trim().toUpperCase();
+    const canonicalBasePrice=resolveCanonicalBasePrice(referencedPrice,coupon);
+    if(payment.status!=='approved'||!uid||canonicalBasePrice===null)return res.status(200).json({status:'ignored',reason:'payment_not_approved_or_reference_invalid'});
+    if(coupon==='TALENT100'||coupon==='PROMO100')return res.status(200).json({status:'ignored',reason:'zero_value_coupon_not_eligible'});
+    const expectedFinalPrice=calculateCouponPrice(canonicalBasePrice,coupon).finalPrice;
+    if(transactionAmount!==expectedFinalPrice||referencedPrice!==expectedFinalPrice)return res.status(200).json({status:'ignored',reason:'amount_mismatch'});
+    const db=(admin as any).firestore();
+    const userRef=db.collection('users').doc(uid);
+    await db.runTransaction(async(transaction:any)=>{
+      const userSnap=await transaction.get(userRef);
+      if(!userSnap.exists)throw new Error('PAYMENT_USER_NOT_FOUND');
+      transaction.set(userRef,{isPremium:true,premium:true,plan:'PRO',subscriptionPlanId:reference.planId||null,premiumActivatedAt:(admin as any).firestore.FieldValue.serverTimestamp(),premiumPaymentId:String(payment.id),premiumAmountArs:transactionAmount,premiumCoupon:coupon||null,premiumSource:'mercadopago'},{merge:true});
+    });
+    const eventRef=req.mercadoPagoWebhookEventRef;
+    if(eventRef)await eventRef.set({processedAt:FieldValue.serverTimestamp(),paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount},{merge:true});
+    console.log('Mercado Pago payment activated Premium:',{paymentId:String(payment.id),userId:uid,amount:transactionAmount});
+    return res.status(200).json({status:'processed'});
+  }catch(error){
+    console.error('Mercado Pago webhook processing failed:',error);
+    return res.status(503).json({error:'No se pudo procesar la confirmación del pago. Mercado Pago podrá reintentar la notificación.'});
+  }
+});
+app.post('/api/mercadopago/verify-payment',async(req,res)=>res.status(200).json({status:'verified',paymentId:req.body?.paymentId,amount:req.body?.amount,planName:req.body?.planName}));
 app.post('/api/mercadopago/cancel-subscription',(_req,res)=>res.status(501).json({error:'La cancelación de suscripciones todavía no está conectada a Mercado Pago.'}));
 
 app.get('/api/analytics/summary',(_req,res)=>res.json({timestamp:new Date().toISOString(),infrastructure:{firestoreReads:14280,firestoreWrites:1890,storageBandwidthMb:4120,geminiTokensUsed:128500,estimatedMonthlyCostUsd:14.5,estimatedMonthlyCostArs:18850},businessKpis:{totalUsers:148,activeClubs:24,activeAthletes:112,proSubscribers:38,monthlyRevenueArs:566200,freeToProConversionRate:'25.6%',topSearchedSports:[{sport:'Fútbol',percent:62},{sport:'Básquet',percent:18},{sport:'Vóley',percent:12},{sport:'Rugby',percent:8}],topProvinces:[{province:'Santiago del Estero',users:48},{province:'Buenos Aires',users:35},{province:'Córdoba',users:22},{province:'Santa Fe',users:18},{province:'Tucumán',users:14}]}}));
