@@ -120,6 +120,22 @@ function requirePaymentAuthentication(req: any, res: any, next: any) {
   });
 }
 
+function markFinancialDataAsModelled(_req: any, res: any, next: any) {
+  const originalJson = res.json.bind(res);
+  res.json = (body: any) => {
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      body = {
+        ...body,
+        financialDataSource: 'MODELLED',
+        productionMetricsConnected: false,
+        dataWarning: 'Estos datos financieros son de modelo/simulación y no representan métricas contables o de producción verificadas.',
+      };
+    }
+    return originalJson(body);
+  };
+  return next();
+}
+
 // Compatibility guard: sensitive routes are protected at registration time until
 // every route consumes the exported middleware directly.
 const originalGet = express.application.get;
@@ -137,7 +153,7 @@ function protectSensitiveRoute(original: any) {
         '/api/financial/reserve-config',
         '/api/financial/executive-report',
       ]);
-      return original.call(this, path, adminOnly.has(path) ? requireAdmin : requireAuthenticated, ...handlers);
+      return original.call(this, path, adminOnly.has(path) ? requireAdmin : requireAuthenticated, markFinancialDataAsModelled, ...handlers);
     }
 
     if (typeof path === 'string' && path.startsWith('/api/admin/')) {
