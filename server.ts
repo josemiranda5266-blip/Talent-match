@@ -207,9 +207,17 @@ app.post('/api/mercadopago/webhook',async(req,res)=>{
     if(transactionAmount!==expectedFinalPrice||referencedPrice!==expectedFinalPrice)return res.status(200).json({status:'ignored',reason:'amount_mismatch'});
     const db=(admin as any).firestore();
     const userRef=db.collection('users').doc(uid);
+    const paymentRef=db.collection('mercadopagoPayments').doc(String(payment.id));
+    let paymentAlreadyProcessed=false;
     await db.runTransaction(async(transaction:any)=>{
+      const paymentSnap=await transaction.get(paymentRef);
+      if(paymentSnap.exists){
+        paymentAlreadyProcessed=true;
+        return;
+      }
       const userSnap=await transaction.get(userRef);
       if(!userSnap.exists)throw new Error('PAYMENT_USER_NOT_FOUND');
+      transaction.create(paymentRef,{paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount,coupon:coupon||null,createdAt:FieldValue.serverTimestamp()});
       const currentData=userSnap.data()||{};
       const currentExpiration=currentData.premiumExpiresAt;
       const currentExpirationMs=typeof currentExpiration?.toMillis==='function'?currentExpiration.toMillis():new Date(currentExpiration||0).getTime();
@@ -217,6 +225,11 @@ app.post('/api/mercadopago/webhook',async(req,res)=>{
       const premiumExpiresAt=new Date(baseMs+30*24*60*60*1000);
       transaction.set(userRef,{isPremium:true,premium:true,plan:'PRO',subscriptionPlanId:reference.planId||null,premiumActivatedAt:(admin as any).firestore.FieldValue.serverTimestamp(),premiumExpiresAt,premiumPaymentId:String(payment.id),premiumAmountArs:transactionAmount,premiumCoupon:coupon||null,premiumSource:'mercadopago'},{merge:true});
     });
+    if(paymentAlreadyProcessed){
+      const eventRef=req.mercadoPagoWebhookEventRef;
+      if(eventRef)await eventRef.set({processedAt:FieldValue.serverTimestamp(),paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount,duplicateOfPaymentId:String(payment.id)},{merge:true});
+      return res.status(200).json({status:'already_processed'});
+    }
     invalidatePremiumEntitlement(uid);
     const eventRef=req.mercadoPagoWebhookEventRef;
     if(eventRef)await eventRef.set({processedAt:FieldValue.serverTimestamp(),paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount},{merge:true});
