@@ -87,6 +87,27 @@ function enforceServerPrice(req: any, res: any, next: any) {
   return next();
 }
 
+function rejectSimulatedPreferenceResponse(req: any, res: any, next: any) {
+  const originalJson = res.json.bind(res);
+  res.json = (payload: any) => {
+    const preferenceId = String(payload?.preferenceId || '');
+    const initPoint = String(payload?.init_point || '');
+    const sandboxInitPoint = String(payload?.sandbox_init_point || '');
+    const isSimulated = Boolean(payload?.immediateApproval)
+      || preferenceId.startsWith('PREF-MP-')
+      || preferenceId.startsWith('pref_free_')
+      || initPoint.includes('/checkout/v1/redirect?pref_id=PREF-MP-')
+      || sandboxInitPoint.includes('/checkout/v1/redirect?pref_id=PREF-MP-');
+
+    if (isSimulated) {
+      console.error('Mercado Pago returned a simulated/fallback preference; refusing to expose it as a real payment result.');
+      return originalJson({ error: 'Mercado Pago no devolvió una preferencia real. Configure credenciales válidas y vuelva a intentar.' });
+    }
+    return originalJson(payload);
+  };
+  return next();
+}
+
 async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
   const paymentId = String(req.body?.paymentId || '').trim();
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
@@ -136,7 +157,7 @@ function protectMercadoPagoRoute(original: any) {
     if (typeof path === 'string') {
       if (path === '/api/mercadopago/webhook') return original.call(this, path, verifyMercadoPagoWebhook, recordWebhookIdempotency, ...handlers);
       if (path === '/api/mercadopago/validate-coupon') return original.call(this, path, requireFirebaseUser, ...handlers);
-      if (path === '/api/mercadopago/create-preference') return original.call(this, path, requireFirebaseUser, requireMercadoPagoCredential, enforceServerPrice, ...handlers);
+      if (path === '/api/mercadopago/create-preference') return original.call(this, path, requireFirebaseUser, requireMercadoPagoCredential, enforceServerPrice, rejectSimulatedPreferenceResponse, ...handlers);
       if (path === '/api/mercadopago/verify-payment') return original.call(this, path, requireFirebaseUser, requireMercadoPagoCredential, verifyPaymentAgainstMercadoPago, ...handlers);
       if (path === '/api/mercadopago/cancel-subscription') return original.call(this, path, requireFirebaseUser, rejectUnimplementedCancellation, ...handlers);
     }
