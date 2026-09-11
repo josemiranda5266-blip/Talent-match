@@ -100,7 +100,10 @@ function protectFinancialRoute(original: any) {
 function protectAiMiddleware(original: any) {
   return function protectedUse(this: any, path: any, ...handlers: any[]) {
     if (path === '/api/ai/' && handlers.length > 0) {
-      return original.call(this, path, enforceAiBudget, ...handlers);
+      if (handlers.length === 1) {
+        return original.call(this, path, handlers[0], enforceAiBudget);
+      }
+      return original.call(this, path, handlers[0], enforceAiBudget, ...handlers.slice(1));
     }
     return original.call(this, path, ...handlers);
   };
