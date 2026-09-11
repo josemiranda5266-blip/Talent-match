@@ -99,6 +99,37 @@ async function recordWebhookIdempotency(req: any, res: any, next: any) {
   }
 }
 
+async function requireMercadoPagoCredential(req: any, res: any, next: any) {
+  if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
+    return res.status(503).json({ error: 'Mercado Pago no está configurado en el servidor.' });
+  }
+  return next();
+}
+
+function enforceServerPrice(req: any, res: any, next: any) {
+  const allowedPrices = new Set([14900, 49900, 129000]);
+  const price = Number(String(req.body?.priceMonthly ?? '').replace(/[^0-9.]/g, ''));
+  const coupon = String(req.body?.couponCode || '').trim().toUpperCase();
+
+  if (!Number.isFinite(price) || !allowedPrices.has(price)) {
+    return res.status(400).json({ error: 'Plan o precio no autorizado por el servidor.' });
+  }
+
+  if (req.body?.userId && req.body.userId !== req.user?.uid) {
+    return res.status(403).json({ error: 'El usuario del pago no coincide con la sesión autenticada.' });
+  }
+
+  req.body.userId = req.user.uid;
+  req.body.userEmail = req.user.email || undefined;
+  req.body.priceMonthly = price;
+
+  if (coupon && !['TALENT100', 'PROMO100', 'PRUEBA100', 'PROMO50', 'ARGENTINA50', 'PRO2025', 'CLUB30', 'TALENT20'].includes(coupon)) {
+    return res.status(400).json({ error: 'Cupón no autorizado.' });
+  }
+
+  return next();
+}
+
 async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
   const paymentId = String(req.body?.paymentId || '').trim();
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
@@ -140,6 +171,12 @@ async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: any) {
   }
 }
 
+async function rejectUnimplementedCancellation(_req: any, res: any, _next: any) {
+  return res.status(501).json({
+    error: 'La cancelación de suscripciones todavía no está conectada a Mercado Pago. No se informa una cancelación hasta que exista confirmación real del proveedor.',
+  });
+}
+
 function protectMercadoPagoRoute(original: any) {
   return function protectedRoute(this: any, path: any, ...handlers: any[]) {
     if (typeof path === 'string') {
@@ -147,16 +184,20 @@ function protectMercadoPagoRoute(original: any) {
         return original.call(this, path, verifyMercadoPagoWebhook, recordWebhookIdempotency, ...handlers);
       }
 
-      if (
-        path === '/api/mercadopago/validate-coupon' ||
-        path === '/api/mercadopago/create-preference' ||
-        path === '/api/mercadopago/verify-payment' ||
-        path === '/api/mercadopago/cancel-subscription'
-      ) {
-        const middleware = path === '/api/mercadopago/verify-payment'
-          ? [requireFirebaseUser, verifyPaymentAgainstMercadoPago]
-          : [requireFirebaseUser];
-        return original.call(this, path, ...middleware, ...handlers);
+      if (path === '/api/mercadopago/validate-coupon') {
+        return original.call(this, path, requireFirebaseUser, ...handlers);
+      }
+
+      if (path === '/api/mercadopago/create-preference') {
+        return original.call(this, path, requireFirebaseUser, requireMercadoPagoCredential, enforceServerPrice, ...handlers);
+      }
+
+      if (path === '/api/mercadopago/verify-payment') {
+        return original.call(this, path, requireFirebaseUser, requireMercadoPagoCredential, verifyPaymentAgainstMercadoPago, ...handlers);
+      }
+
+      if (path === '/api/mercadopago/cancel-subscription') {
+        return original.call(this, path, requireFirebaseUser, rejectUnimplementedCancellation, ...handlers);
       }
     }
 
