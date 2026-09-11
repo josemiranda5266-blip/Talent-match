@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
@@ -21,51 +21,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-
-      - name: Harden Mercado Pago payment idempotency
-        if: github.ref == 'refs/heads/production-hardening' && github.event_name == 'push'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('server.ts')
-          s = p.read_text()
-          old = """    const userRef=db.collection('users').doc(uid);\n    await db.runTransaction(async(transaction:any)=>{\n      const userSnap=await transaction.get(userRef);\n      if(!userSnap.exists)throw new Error('PAYMENT_USER_NOT_FOUND');\n      const currentData=userSnap.data()||{};"""
-          new = """    const userRef=db.collection('users').doc(uid);\n    const paymentRef=db.collection('mercadopagoPayments').doc(String(payment.id));\n    let paymentAlreadyProcessed=false;\n    await db.runTransaction(async(transaction:any)=>{\n      const paymentSnap=await transaction.get(paymentRef);\n      if(paymentSnap.exists){\n        paymentAlreadyProcessed=true;\n        return;\n      }\n      const userSnap=await transaction.get(userRef);\n      if(!userSnap.exists)throw new Error('PAYMENT_USER_NOT_FOUND');\n      transaction.create(paymentRef,{paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount,coupon:coupon||null,createdAt:FieldValue.serverTimestamp()});\n      const currentData=userSnap.data()||{};"""
-          if old not in s:
-              raise SystemExit('target transaction block not found')
-          s = s.replace(old, new, 1)
-          old2 = """    invalidatePremiumEntitlement(uid);\n    const eventRef=req.mercadoPagoWebhookEventRef;"""
-          new2 = """    if(paymentAlreadyProcessed){\n      const eventRef=req.mercadoPagoWebhookEventRef;\n      if(eventRef)await eventRef.set({processedAt:FieldValue.serverTimestamp(),paymentId:String(payment.id),userId:uid,status:payment.status,amount:transactionAmount,duplicateOfPaymentId:String(payment.id)},{merge:true});\n      return res.status(200).json({status:'already_processed'});\n    }\n    invalidatePremiumEntitlement(uid);\n    const eventRef=req.mercadoPagoWebhookEventRef;"""
-          if old2 not in s:
-              raise SystemExit('target post-transaction block not found')
-          s = s.replace(old2, new2, 1)
-          p.write_text(s)
-          PY
-
-          git diff --check
-          git diff -- server.ts
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add server.ts
-          git commit -m "fix(payments): make webhook activation payment-idempotent"
-          git push
-
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('.github/workflows/quality.yml')
-          s = p.read_text()
-          start = s.find("      - name: Harden Mercado Pago payment idempotency\n")
-          if start != -1:
-              end = s.find("      - name: Install dependencies\n", start)
-              if end == -1:
-                  raise SystemExit('cleanup marker not found')
-              s = s[:start] + s[end:]
-          p.write_text(s)
-          PY
-          git add .github/workflows/quality.yml
-          git commit -m "chore(ci): remove temporary payment hardening step"
-          git push
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
