@@ -64,6 +64,7 @@ async function reserveDailyAiQuota(uid: string, day: string, limit: number): Pro
 export async function enforceAiBudget(req: any, res: any, next: any) {
   const uid = String(req.user?.uid || '');
   if (!uid) return res.status(401).json({ error: 'Usuario autenticado requerido.' });
+  if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: 'La IA no está configurada en el servidor. Configure GEMINI_API_KEY antes de habilitar funciones de IA.' });
   const isPremium = await resolvePremiumEntitlement(uid);
   const limit = isPremium ? PREMIUM_AI_DAILY_LIMIT : FREE_AI_DAILY_LIMIT;
   const day = new Date().toISOString().slice(0, 10);
