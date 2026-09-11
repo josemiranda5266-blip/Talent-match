@@ -63,7 +63,7 @@ export const ReviewsModal: React.FC<ReviewsModalProps> = ({
         authorAvatar: currentUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
         rating: ratingInput,
         comment: commentInput,
-        createdAt: new Date().toISOString().split('T')[0]
+        createdAt: new Date().toISOString().split('T')[0] || ''
       };
 
       await addReputationReview(newRev);
@@ -105,7 +105,6 @@ export const ReviewsModal: React.FC<ReviewsModalProps> = ({
           </button>
         </div>
 
-        {/* Rating Summary Header */}
         <div className="bg-[#0a0a0c] border border-white/10 p-4 rounded-2xl flex items-center justify-between">
           <div>
             <span className="text-[10px] text-white/40 uppercase font-bold block">Promedio de Calificación</span>
@@ -126,7 +125,6 @@ export const ReviewsModal: React.FC<ReviewsModalProps> = ({
           </span>
         </div>
 
-        {/* Reviews List */}
         <div className="max-h-60 overflow-y-auto space-y-3 pr-1">
           {reviews.length === 0 ? (
             <div className="text-center py-6 text-white/40 text-xs">
@@ -160,35 +158,21 @@ export const ReviewsModal: React.FC<ReviewsModalProps> = ({
           )}
         </div>
 
-        {/* Submit Review Form */}
         {currentUser ? (
           <form onSubmit={handleSubmitReview} className="space-y-3 pt-3 border-t border-white/10 text-xs">
             <div>
-              <label className="text-white/60 font-bold uppercase text-[10px] block mb-1">
-                Tu Valoración
-              </label>
+              <label className="text-white/60 font-bold uppercase text-[10px] block mb-1">Tu Valoración</label>
               <div className="flex items-center gap-2">
                 {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    type="button"
-                    onClick={() => setRatingInput(star)}
-                    className="p-1 hover:scale-110 transition-transform"
-                  >
-                    <Star
-                      className={`w-6 h-6 ${
-                        star <= ratingInput ? 'fill-yellow-400 text-yellow-400' : 'text-white/20'
-                      }`}
-                    />
+                  <button key={star} type="button" onClick={() => setRatingInput(star)} className="p-1 hover:scale-110 transition-transform">
+                    <Star className={`w-6 h-6 ${star <= ratingInput ? 'fill-yellow-400 text-yellow-400' : 'text-white/20'}`} />
                   </button>
                 ))}
               </div>
             </div>
 
             <div>
-              <label className="text-white/60 font-bold uppercase text-[10px] block mb-1">
-                Comentario Deportivo / Reseña Técnica
-              </label>
+              <label className="text-white/60 font-bold uppercase text-[10px] block mb-1">Comentario Deportivo / Reseña Técnica</label>
               <textarea
                 required
                 value={commentInput}
