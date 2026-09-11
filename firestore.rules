@@ -21,7 +21,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
       allow list: if isAdmin();
-      allow create: if isAdmin() || (isAuthenticated() && request.auth.uid == userId &&
+      allow create: if isAdmin() || (isAuthenticated() && request.auth.uid == userId && request.resource.data.uid == request.auth.uid &&
         !request.resource.data.keys().hasAny(['isPremium', 'premium', 'plan', 'premiumExpiresAt', 'subscriptionPlanId', 'premiumActivatedAt', 'premiumPaymentId', 'premiumAmountArs', 'premiumCoupon', 'premiumSource']));
       allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.uid == resource.data.uid &&
