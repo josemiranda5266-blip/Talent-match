@@ -1,10 +1,11 @@
-import * as admin from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore, FieldValue, type DocumentData } from 'firebase-admin/firestore';
 
-if (!admin.apps.length) {
-  admin.initializeApp();
+if (!getApps().length) {
+  initializeApp();
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 
 // Public discovery intentionally excludes precise body measurements and response
 // telemetry. Detailed profile data remains available through authenticated flows.
@@ -27,7 +28,7 @@ const PUBLIC_FIELDS = [
   'activityLevel',
 ] as const;
 
-function sanitizeAthlete(data: FirebaseFirestore.DocumentData) {
+function sanitizeAthlete(data: DocumentData) {
   const publicData: Record<string, unknown> = {};
   for (const field of PUBLIC_FIELDS) {
     if (data[field] !== undefined) publicData[field] = data[field];
@@ -54,7 +55,7 @@ async function main() {
       batch.set(publicRef, {
         ...sanitizeAthlete(data),
         published: data.availableForTrials !== false,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       }, { merge: false });
     }
 
@@ -82,6 +83,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Public athlete projection sync failed:', error);
+  console.error('Public athlete synchronization failed:', error);
   process.exitCode = 1;
 });
