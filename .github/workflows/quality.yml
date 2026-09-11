@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
@@ -30,27 +30,3 @@ jobs:
 
       - name: Typecheck
         run: bun run typecheck
-
-      - name: Apply one-time checkout hardening
-        if: github.ref == 'refs/heads/production-hardening' && github.event.head_commit.message != 'chore(security): harden real Mercado Pago checkout flow'
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('src/components/CheckoutModal.tsx')
-          s = p.read_text()
-          old = '''      const res = await fetch('/api/mercadopago/create-preference', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({\n          planId: plan.id,\n          planName: plan.name,\n          priceMonthly: appliedDiscount ? appliedDiscount.finalPrice : plan.priceMonthly,\n          userEmail: auth.currentUser?.email || 'usuario@talentmatch.com.ar',\n          userId: auth.currentUser?.uid || 'guest_user',\n          couponCode: appliedDiscount?.code,\n        }),\n      });\n\n      const mpPrefData = await res.json();\n\n      // If 100% coupon applied, immediately approve\n      if (mpPrefData.immediateApproval || appliedDiscount?.discountPercent === 100) {\n        const finalPrice = '$0 ARS';\n        const newReceipt: TransactionReceipt = {\n          id: mpPrefData.paymentId || `MP-100FREE-${Date.now().toString().slice(-6)}`,\n          planId: plan.id,\n          planName: plan.name,\n          amount: finalPrice,\n          currency: 'ARS',\n          date: new Date().toLocaleString('es-AR', { dateStyle: 'medium', timeStyle: 'short' }),\n          paymentMethod: 'mercadopago',\n          status: 'Approved',\n          transactionHash: `sha256_coupon_${Math.random().toString(36).substring(2, 12)}`,\n          pciToken: `tok_promo_100`,\n          buyerName: auth.currentUser?.displayName || 'Usuario TalentMatch PRO',\n          buyerTaxId: buyerTaxId || '20-38192019-8',\n          securitySeal: 'ISO-27001-PCI-DSS-PROMO',\n        };\n\n        if (auth.currentUser?.uid) {\n          await recordPaymentAndGrantPro(auth.currentUser.uid, {\n            userId: auth.currentUser.uid,\n            userEmail: auth.currentUser.email || '',\n            planId: plan.id,\n            planName: plan.name,\n            amount: finalPrice,\n            currency: 'ARS',\n            status: 'Approved',\n            paymentMethod: 'mercadopago_coupon',\n            transactionHash: newReceipt.transactionHash,\n            createdAt: new Date().toISOString(),\n          });\n        }\n\n        setReceipt(newReceipt);\n        setProcessStep('completed');\n        setIsProcessing(false);\n        onSuccess(newReceipt);\n        return;\n      }\n\n      // If standard Mercado Pago, trigger 3DS verification step & record payment\n      setTimeout(() => {\n        setIsProcessing(false);\n        setProcessStep('3ds_verification');\n      }, 1200);\n'''
-          new = '''      const res = await fetch('/api/mercadopago/create-preference', {\n        method: 'POST',\n        headers: {\n          'Content-Type': 'application/json',\n          ...(auth.currentUser ? { Authorization: `Bearer ${await auth.currentUser.getIdToken()}` } : {}),\n        },\n        body: JSON.stringify({\n          planId: plan.id,\n          planName: plan.name,\n          // The server expects the canonical plan price; it calculates the final\n          // discounted amount itself. Never trust the client-calculated total.\n          priceMonthly: plan.priceMonthly,\n          couponCode: appliedDiscount?.code,\n        }),\n      });\n\n      const mpPrefData = await res.json();\n      if (!res.ok || !mpPrefData.init_point || mpPrefData.immediateApproval) {\n        throw new Error(mpPrefData.error || 'Mercado Pago no devolvió una preferencia de pago real.');\n      }\n\n      // Checkout Pro must send the buyer to Mercado Pago. There is no local\n      // simulated 3DS/approval step and no client-side premium activation.\n      window.location.assign(mpPrefData.init_point);\n      return;\n'''
-          if old not in s:
-              raise SystemExit('expected handleStartPayment block not found')
-          s = s.replace(old, new, 1)
-          start = s.index('  const handleConfirmOtp = async () => {')
-          end = s.index('\n  const handleCopyAlias', start)
-          replacement = '''  const handleConfirmOtp = async () => {\n    // Mercado Pago owns the payment/3DS flow. This local OTP path is intentionally\n    // disabled so the client can never manufacture an approved transaction.\n    setIsProcessing(false);\n    setCouponError('La confirmación se realiza directamente en Mercado Pago. No se acepta una aprobación manual desde la aplicación.');\n    setProcessStep('form');\n  };\n'''
-          s = s[:start] + replacement + s[end:]
-          p.write_text(s)
-          PY
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/components/CheckoutModal.tsx
-          git commit -m 'chore(security): harden real Mercado Pago checkout flow'
-          git push
