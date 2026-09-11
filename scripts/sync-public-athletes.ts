@@ -21,7 +21,6 @@ const PUBLIC_FIELDS = [
   'bio',
   'stats',
   'availableForTrials',
-  'isPremium',
   'isVerified',
   'rating',
   'verificationTier',
@@ -39,20 +38,27 @@ function sanitizeAthlete(data: FirebaseFirestore.DocumentData) {
 
 async function main() {
   const snapshot = await db.collection('athletes').get();
-  const batch = db.batch();
+  const docs = snapshot.docs;
 
-  for (const athlete of snapshot.docs) {
-    const publicRef = db.collection('publicAthletes').doc(athlete.id);
-    batch.set(publicRef, {
-      ...sanitizeAthlete(athlete.data()),
-      sourceAthleteId: athlete.id,
-      published: athlete.data().availableForTrials !== false,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+  for (let offset = 0; offset < docs.length; offset += 450) {
+    const batch = db.batch();
+    const chunk = docs.slice(offset, offset + 450);
+
+    for (const athlete of chunk) {
+      const data = athlete.data();
+      const publicRef = db.collection('publicAthletes').doc(athlete.id);
+      batch.set(publicRef, {
+        ...sanitizeAthlete(data),
+        sourceAthleteId: athlete.id,
+        published: data.availableForTrials !== false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    if (chunk.length > 0) await batch.commit();
   }
 
-  if (!snapshot.empty) await batch.commit();
-  console.log(`Synchronized ${snapshot.size} athlete public projections.`);
+  console.log(`Synchronized ${docs.length} athlete public projections.`);
 }
 
 main().catch((error) => {
