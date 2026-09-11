@@ -1,5 +1,4 @@
 import * as admin from 'firebase-admin';
-import express from 'express';
 
 if (!(admin as any).apps?.length) {
   try {
@@ -9,7 +8,7 @@ if (!(admin as any).apps?.length) {
   }
 }
 
-async function requireAuthenticated(req: any, res: any, next: any) {
+export async function requireAuthenticated(req: any, res: any, next: any) {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token de autenticación requerido.' });
@@ -27,19 +26,21 @@ async function requireAuthenticated(req: any, res: any, next: any) {
   }
 }
 
-async function requireAdmin(req: any, res: any, next: any) {
-  await requireAuthenticated(req, res, async () => {
-    const claims = req.user || {};
-    if (claims.admin === true || claims.role === 'admin') return next();
-    return res.status(403).json({ error: 'Se requieren permisos administrativos.' });
-  });
+export async function requireAdmin(req: any, res: any, next: any) {
+  if (!req.user) {
+    return requireAuthenticated(req, res, () => requireAdmin(req, res, next));
+  }
+
+  const claims = req.user || {};
+  if (claims.admin === true || claims.role === 'admin') return next();
+  return res.status(403).json({ error: 'Se requieren permisos administrativos.' });
 }
 
-const aiUsage = new Map<string, { day: string; count: number }>();
 const FREE_AI_DAILY_LIMIT = 5;
 const PREMIUM_AI_DAILY_LIMIT = 100;
+const aiUsage = new Map<string, { day: string; count: number }>();
 
-function enforceAiBudget(req: any, res: any, next: any) {
+export function enforceAiBudget(req: any, res: any, next: any) {
   const uid = String(req.user?.uid || '');
   if (!uid) return res.status(401).json({ error: 'Usuario autenticado requerido.' });
 
@@ -69,51 +70,3 @@ function enforceAiBudget(req: any, res: any, next: any) {
   res.setHeader('X-AI-Daily-Remaining', String(Math.max(0, limit - current.count)));
   return next();
 }
-
-const originalGet = express.application.get;
-const originalPost = express.application.post;
-const originalPut = express.application.put;
-const originalPatch = express.application.patch;
-const originalDelete = express.application.delete;
-const originalUse = express.application.use;
-
-function protectFinancialRoute(original: any) {
-  return function protectedRoute(this: any, path: any, ...handlers: any[]) {
-    if (typeof path === 'string' && path.startsWith('/api/financial/')) {
-      const adminOnly = new Set([
-        '/api/financial/summary',
-        '/api/financial/reserve-config',
-        '/api/financial/executive-report',
-      ]);
-      const middleware = adminOnly.has(path) ? requireAdmin : requireAuthenticated;
-      return original.call(this, path, middleware, ...handlers);
-    }
-
-    if (typeof path === 'string' && path.startsWith('/api/admin/')) {
-      return original.call(this, path, requireAdmin, ...handlers);
-    }
-
-    return original.call(this, path, ...handlers);
-  };
-}
-
-function protectAiMiddleware(original: any) {
-  return function protectedUse(this: any, path: any, ...handlers: any[]) {
-    if (path === '/api/ai/' && handlers.length > 0) {
-      if (handlers.length === 1) {
-        return original.call(this, path, handlers[0], enforceAiBudget);
-      }
-      return original.call(this, path, handlers[0], enforceAiBudget, ...handlers.slice(1));
-    }
-    return original.call(this, path, ...handlers);
-  };
-}
-
-express.application.get = protectFinancialRoute(originalGet) as any;
-express.application.post = protectFinancialRoute(originalPost) as any;
-express.application.put = protectFinancialRoute(originalPut) as any;
-express.application.patch = protectFinancialRoute(originalPatch) as any;
-express.application.delete = protectFinancialRoute(originalDelete) as any;
-express.application.use = protectAiMiddleware(originalUse) as any;
-
-export {};
