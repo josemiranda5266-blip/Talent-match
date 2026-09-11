@@ -1,5 +1,4 @@
 import * as admin from 'firebase-admin';
-import express from 'express';
 
 if (!(admin as any).apps?.length) {
   try { (admin as any).initializeApp(); } catch (error) { console.error('Runtime security Firebase initialization notice:', error); }
@@ -119,45 +118,3 @@ export function sanitizeAiErrorResponse(_req: any, res: any, next: any) {
   };
   return next();
 }
-
-// Transitional compatibility layer: keep protections active until route registration
-// is moved into server.ts. The middleware functions above are exported for that migration.
-const originalGet = express.application.get;
-const originalPost = express.application.post;
-const originalPut = express.application.put;
-const originalPatch = express.application.patch;
-const originalDelete = express.application.delete;
-const originalUse = express.application.use;
-
-function protectSensitiveRoute(original: any) {
-  return function protectedRoute(this: any, path: any, ...handlers: any[]) {
-    if (typeof path === 'string' && path.startsWith('/api/financial/')) {
-      const adminOnly = new Set(['/api/financial/summary', '/api/financial/reserve-config', '/api/financial/executive-report']);
-      return original.call(this, path, adminOnly.has(path) ? requireAdmin : requireAuthenticated, markFinancialDataAsModelled, ...handlers);
-    }
-    if (typeof path === 'string' && path.startsWith('/api/admin/')) return original.call(this, path, requireAdmin, ...handlers);
-    if (path === '/api/analytics/summary') return original.call(this, path, requireAdmin, markAnalyticsDataAsModelled, ...handlers);
-    if (typeof path === 'string' && path.startsWith('/api/mercadopago/')) {
-      const protectedPaymentRoutes = new Set(['/api/mercadopago/create-preference', '/api/mercadopago/verify-payment', '/api/mercadopago/cancel-subscription']);
-      if (protectedPaymentRoutes.has(path)) return original.call(this, path, requirePaymentAuthentication, ...handlers);
-    }
-    return original.call(this, path, ...handlers);
-  };
-}
-
-function protectAiMiddleware(original: any) {
-  return function protectedUse(this: any, path: any, ...handlers: any[]) {
-    if (path === '/api/ai/' && handlers.length > 0) {
-      if (handlers.length === 1) return original.call(this, path, handlers[0], enforceAiBudget, sanitizeAiErrorResponse);
-      return original.call(this, path, handlers[0], enforceAiBudget, sanitizeAiErrorResponse, ...handlers.slice(1));
-    }
-    return original.call(this, path, ...handlers);
-  };
-}
-
-express.application.get = protectSensitiveRoute(originalGet) as any;
-express.application.post = protectSensitiveRoute(originalPost) as any;
-express.application.put = protectSensitiveRoute(originalPut) as any;
-express.application.patch = protectSensitiveRoute(originalPatch) as any;
-express.application.delete = protectSensitiveRoute(originalDelete) as any;
-express.application.use = protectAiMiddleware(originalUse) as any;
