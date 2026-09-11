@@ -10,29 +10,31 @@ service firebase.storage {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Admin authorization should be issued as a Firebase custom claim.
+    // Do not depend on a Firestore lookup from Storage rules.
     function isAdmin() {
-      return isAuthenticated() &&
-        (request.auth.token.role == 'admin' ||
-          (firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+      return isAuthenticated() && request.auth.token.role == 'admin';
     }
 
-    // User-owned media. Keep uploads authenticated and bounded.
+    function validUpload() {
+      return request.resource != null &&
+        request.resource.size <= 20 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*|video/.*|application/pdf');
+    }
+
     match /users/{userId}/{allPaths=**} {
       allow read: if isOwner(userId) || isAdmin();
-      allow write: if isOwner(userId) || isAdmin();
+      allow write: if (isOwner(userId) || isAdmin()) && validUpload();
     }
 
-    // Athlete media follows the authenticated owner.
     match /athletes/{userId}/{allPaths=**} {
       allow read: if isAuthenticated();
-      allow write: if isOwner(userId) || isAdmin();
+      allow write: if (isOwner(userId) || isAdmin()) && validUpload();
     }
 
-    // Public assets must be explicitly published by the server/admin.
     match /public/{allPaths=**} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() && validUpload();
     }
 
     match /{allPaths=**} {
