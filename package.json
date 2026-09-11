@@ -10,7 +10,8 @@
     "clean": "rm -rf dist server.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "check": "npm run typecheck && npm run build"
+    "check": "npm run typecheck && npm run build",
+    "sync:public-athletes": "tsx scripts/sync-public-athletes.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
