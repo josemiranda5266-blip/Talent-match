@@ -1,0 +1,49 @@
+name: Sanitize demo data
+on:
+  push:
+    branches: [production-hardening]
+permissions:
+  contents: write
+jobs:
+  sanitize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+          fetch-depth: 1
+      - name: Sanitize synthetic identities
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('server.ts')
+          text=p.read_text(encoding='utf-8')
+          replacements={
+            'scout.boca@cabj.com.ar':'demo.club001@synthetic.invalid',
+            'contacto@riverplate.com.ar':'demo.club003@synthetic.invalid',
+            'bot_suspicious_99@temp.net':'demo.athlete005@synthetic.invalid',
+          }
+          for old,new in replacements.items():
+            text=text.replace(old,new)
+          for old in replacements:
+            if old in text: raise SystemExit(f'unsanitized identity remains: {old}')
+          p.write_text(text,encoding='utf-8')
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Verify build and types
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git rm .github/workflows/sanitize-demo-data.yml
+          git commit -m 'security: sanitize remaining synthetic financial identities'
+          git push origin HEAD:production-hardening
