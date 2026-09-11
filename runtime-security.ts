@@ -72,9 +72,23 @@ export function enforceAiBudget(req: any, res: any, next: any) {
   return next();
 }
 
-// Compatibility guard: until all routes consume the exported middleware directly,
-// keep a narrow registration hook so newly registered sensitive routes cannot
-// accidentally bypass authentication.
+function requirePaymentAuthentication(req: any, res: any, next: any) {
+  return requireAuthenticated(req, res, () => {
+    if (!process.env.MERCADOPAGO_ACCESS_TOKEN) {
+      return res.status(503).json({
+        error: 'Mercado Pago no está configurado para operar en este entorno.',
+      });
+    }
+
+    if (!req.body || typeof req.body !== 'object') req.body = {};
+    req.body.userId = req.user.uid;
+    if (req.user.email) req.body.userEmail = req.user.email;
+    return next();
+  });
+}
+
+// Compatibility guard: sensitive routes are protected at registration time until
+// every route consumes the exported middleware directly.
 const originalGet = express.application.get;
 const originalPost = express.application.post;
 const originalPut = express.application.put;
@@ -96,6 +110,17 @@ function protectSensitiveRoute(original: any) {
 
     if (typeof path === 'string' && path.startsWith('/api/admin/')) {
       return original.call(this, path, requireAdmin, ...handlers);
+    }
+
+    if (typeof path === 'string' && path.startsWith('/api/mercadopago/')) {
+      const protectedPaymentRoutes = new Set([
+        '/api/mercadopago/create-preference',
+        '/api/mercadopago/verify-payment',
+        '/api/mercadopago/cancel-subscription',
+      ]);
+      if (protectedPaymentRoutes.has(path)) {
+        return original.call(this, path, requirePaymentAuthentication, ...handlers);
+      }
     }
 
     return original.call(this, path, ...handlers);
