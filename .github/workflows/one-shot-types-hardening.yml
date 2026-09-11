@@ -16,12 +16,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-      - name: Apply strict TypeScript fixes
+      - name: Apply final strict TypeScript fixes
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import re
 
           def edit(path, fn):
               p = Path(path)
@@ -32,37 +31,15 @@ jobs:
                   print('updated', path)
 
           edit('src/components/AdminPanelView.tsx', lambda s: s
-              .replace('alert.type', "(alert as FraudAlert & { type?: string }).type")
-              .replace('rep.reportedUserId || rep.reporterId', 'rep.reportedUserId')
-              .replace('onClick={() => handleResolveFraudAlert(alert.id)}', "onClick={() => { if (alert.id) handleResolveFraudAlert(alert.id); }}")
+              .replace("onClick={() => handleSuspendAccount(rep.reportedUserId, rep.reporterName || 'Usuario')}", "onClick={() => { if (rep.reportedUserId) handleSuspendAccount(rep.reportedUserId, rep.reporterName || 'Usuario'); }}")
+              .replace("onClick={() => handleBanAccount(rep.reportedUserId, rep.reporterName || 'Usuario')}", "onClick={() => { if (rep.reportedUserId) handleBanAccount(rep.reportedUserId, rep.reporterName || 'Usuario'); }}")
           )
 
-          edit('src/components/AthleteView.tsx', lambda s: s
-              .replace('Array.from(new Set([...updatedStats.achievements, ...data.keyAchievements]))', 'Array.from(new Set([...(updatedStats.achievements ?? []), ...data.keyAchievements]))')
-              .replace('const updatedStats = { ...formData.stats };', "const updatedStats = {\n      matchesPlayed: formData.stats?.matchesPlayed ?? 0,\n      goalsOrPoints: formData.stats?.goalsOrPoints ?? 0,\n      assists: formData.stats?.assists,\n      minutesPlayed: formData.stats?.minutesPlayed,\n      achievements: formData.stats?.achievements ?? [],\n    };")
-          )
-
-          edit('src/components/ChatModal.tsx', lambda s: s.replace('setActiveConversationId(list[0].id);', 'setActiveConversationId(list[0]?.id ?? null);'))
-
-          edit('src/components/ClubView.tsx', lambda s: s.replace(
-              'onInviteCandidate={(athId) => {\n          onOpenCandidateModal(athletes.find(a => a.id === athId) || athletes[0]);\n        }}',
-              'onInviteCandidate={(athId) => {\n          const candidate = athletes.find(a => a.id === athId);\n          if (candidate) onOpenCandidateModal(candidate);\n        }}'
-          ))
-
-          edit('src/components/OnboardingModal.tsx', lambda s: s.replace('const currentData = steps[currentStep];', 'const currentData = steps[currentStep] ?? steps[0];'))
-
-          edit('src/components/ReviewsAndReferencesModal.tsx', lambda s: s.replace('currentUser.avatar', "(currentUser as UserProfile & { avatar?: string }).avatar"))
-
-          edit('src/components/SmartFeedView.tsx', lambda s: s.replace(
-              'const athleteObj = currentAthlete || allCandidates[0];\n',
-              'const athleteObj = currentAthlete || allCandidates[0];\n  if (!athleteObj) return null;\n'
-          ))
+          edit('src/components/OnboardingModal.tsx', lambda s: s.replace('const currentData = steps[currentStep] ?? steps[0];', 'const currentData = steps[currentStep] ?? steps[0]!;'))
 
           edit('src/components/TournamentsView.tsx', lambda s: s
-              .replace('PRESET_BANNERS[0].url', "PRESET_BANNERS[0]?.url ?? ''")
-              .replace('t.contactWhatsApp.replace(', "(t.contactWhatsApp ?? '').replace(")
-              .replace('selectedTournamentDetail.contactWhatsApp.replace(', "(selectedTournamentDetail.contactWhatsApp ?? '').replace(")
-              .replace('contactWhatsApp})', "contactWhatsApp ?? ''})")
+              .replace("bannerImage: bannerImage || PRESET_BANNERS[0]?.url ?? ''", "bannerImage: bannerImage || (PRESET_BANNERS[0]?.url ?? '')")
+              .replace("startDate: startDate || new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString()", "startDate: startDate || (new Date().toISOString().split('T')[0] ?? new Date().toISOString())")
           )
           PY
 
@@ -76,7 +53,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src
           if ! git diff --cached --quiet; then
-            git commit -m 'fix(types): close remaining strict component errors'
+            git commit -m 'fix(types): finalize strict TypeScript cleanup'
             git push
           fi
           exit $status
