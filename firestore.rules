@@ -24,13 +24,10 @@ service cloud.firestore {
         request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
     }
 
-    // User accounts: private by default. Public discovery must use a dedicated
-    // public profile projection, not the canonical user document.
     match /users/{userId} {
       allow get: if isAdmin() || isOwner(userId);
       allow list: if isAdmin();
-      allow create: if isOwner(userId) &&
-        request.resource.data.role != 'admin';
+      allow create: if isOwner(userId) && request.resource.data.role != 'admin';
       allow update: if isAdmin() ||
         (isOwner(userId) &&
           request.resource.data.role == resource.data.role &&
@@ -38,8 +35,6 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Athlete records can only be accessed by the owner or an administrator.
-    // Public scouting/search results use the sanitized publicAthletes projection.
     match /athletes/{athleteId} {
       allow get: if isAdmin() ||
         (isAuthenticated() &&
@@ -53,15 +48,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Sanitized athlete discovery projection. It must be populated by trusted
-    // server-side/admin tooling; clients have read-only access.
+    // Sanitized public athlete directory. Canonical athlete records remain private.
     match /publicAthletes/{athleteId} {
       allow get, list: if true;
       allow create, update, delete: if isAdmin();
     }
 
-    // Club searches/conventions can be publicly discoverable only through a
-    // sanitized projection/API. Direct Firestore access is restricted.
     match /searches/{searchId} {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
@@ -73,8 +65,12 @@ service cloud.firestore {
         (isAuthenticated() && resource.data.clubId == request.auth.uid);
     }
 
-    // Applications are private. In particular, authenticated users must not
-    // be able to list every application in the system.
+    // Public read-only projections for directory/listing screens.
+    match /publicSearches/{searchId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
     match /applications/{applicationId} {
       allow get: if isAdmin() ||
         (isAuthenticated() &&
@@ -100,6 +96,11 @@ service cloud.firestore {
         (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
     }
 
+    match /publicTeams/{teamId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
     match /tournaments/{tournamentId} {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
@@ -111,7 +112,11 @@ service cloud.firestore {
         (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
     }
 
-    // Conversations and messages: participants only.
+    match /publicTournaments/{tournamentId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
     match /conversations/{conversationId} {
       allow get: if isAdmin() || isConversationParticipant(conversationId);
       allow list: if isAdmin();
@@ -131,8 +136,6 @@ service cloud.firestore {
       }
     }
 
-    // Notifications are private and must not be forgeable by arbitrary users.
-    // Creation should normally happen server-side with Admin SDK.
     match /notifications/{notificationId} {
       allow get: if isAdmin() ||
         (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
@@ -142,7 +145,6 @@ service cloud.firestore {
         (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
     }
 
-    // Reviews are public-facing content, but creation must be tied to the author.
     match /userReviews/{reviewId} {
       allow get, list: if true;
       allow create: if isAdmin() ||
@@ -151,7 +153,6 @@ service cloud.firestore {
         (isAuthenticated() && resource.data.authorUserId == request.auth.uid);
     }
 
-    // Verified references must be moderated/server-created.
     match /verifiedReferences/{referenceId} {
       allow get, list: if true;
       allow create, update, delete: if isAdmin();
@@ -165,7 +166,6 @@ service cloud.firestore {
         (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
 
-    // Identity/accreditation data is private.
     match /verifications/{verificationId} {
       allow get: if isAdmin() ||
         (isAuthenticated() && resource.data.userId == request.auth.uid);
@@ -184,7 +184,6 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // Reports, fraud alerts and moderation logs are administrative/private.
     match /reports/{reportId} {
       allow get, list: if isAdmin();
       allow create: if isAdmin() ||
@@ -218,7 +217,6 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // Default deny: new collections are private until explicitly reviewed.
     match /{document=**} {
       allow read, write: if false;
     }
