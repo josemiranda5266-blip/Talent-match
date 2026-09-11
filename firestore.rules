@@ -20,25 +20,16 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isAdmin() || isOwner(userId);
       allow list: if isAdmin();
-      allow create: if isOwner(userId) &&
-        request.resource.data.role != 'admin' &&
-        !request.resource.data.keys().hasAny(['isPremium', 'premium', 'plan']);
-      allow update: if isAdmin() ||
-        (isOwner(userId) &&
-          request.resource.data.role == resource.data.role &&
-          request.resource.data.uid == resource.data.uid &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPremium', 'premium', 'plan']));
+      allow create: if isOwner(userId) && request.resource.data.role != 'admin' && !request.resource.data.keys().hasAny(['isPremium', 'premium', 'plan']);
+      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.uid == resource.data.uid && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPremium', 'premium', 'plan']));
       allow delete: if isAdmin();
     }
 
     match /athletes/{athleteId} {
-      allow get: if isAdmin() || (isAuthenticated() &&
-        (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
+      allow get: if isAdmin() || (isAuthenticated() && (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
       allow list: if isAdmin();
-      allow create: if isAuthenticated() &&
-        (request.resource.data.userId == request.auth.uid || athleteId == request.auth.uid);
-      allow update: if isAdmin() || (isAuthenticated() &&
-        (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
+      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || athleteId == request.auth.uid);
+      allow update: if isAdmin() || (isAuthenticated() && (resource.data.userId == request.auth.uid || athleteId == request.auth.uid) && request.resource.data.userId == resource.data.userId);
       allow delete: if isAdmin();
     }
 
@@ -51,8 +42,7 @@ service cloud.firestore {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
       allow create: if isAuthenticated() && (request.resource.data.clubId == request.auth.uid || isAdmin());
-      allow update: if isAdmin() ||
-        (isAuthenticated() && resource.data.clubId == request.auth.uid && request.resource.data.clubId == resource.data.clubId);
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid && request.resource.data.clubId == resource.data.clubId);
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid);
     }
 
@@ -62,23 +52,18 @@ service cloud.firestore {
     }
 
     match /applications/{applicationId} {
-      allow get: if isAdmin() || (isAuthenticated() &&
-        (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
+      allow get: if isAdmin() || (isAuthenticated() && (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
       allow list: if isAdmin();
-      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
-      allow update: if isAdmin() || (isAuthenticated() &&
-        resource.data.athleteId == request.auth.uid &&
-        request.resource.data.athleteId == resource.data.athleteId &&
-        request.resource.data.clubId == resource.data.clubId);
-      allow delete: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
+      allow create: if isAdmin() || (isAuthenticated() && request.resource.data.athleteId == request.auth.uid && request.resource.data.clubId != request.auth.uid);
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid && request.resource.data.athleteId == resource.data.athleteId && request.resource.data.clubId == resource.data.clubId);
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid);
     }
 
     match /teams/{teamId} {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
       allow create: if isAuthenticated() && (request.resource.data.ownerUserId == request.auth.uid || isAdmin());
-      allow update: if isAdmin() ||
-        (isAuthenticated() && resource.data.ownerUserId == request.auth.uid && request.resource.data.ownerUserId == resource.data.ownerUserId);
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.ownerUserId == request.auth.uid && request.resource.data.ownerUserId == resource.data.ownerUserId);
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
     }
 
@@ -91,8 +76,7 @@ service cloud.firestore {
       allow get: if isAuthenticated() || isAdmin();
       allow list: if isAdmin();
       allow create: if isAuthenticated() && (request.resource.data.organizerUserId == request.auth.uid || isAdmin());
-      allow update: if isAdmin() ||
-        (isAuthenticated() && resource.data.organizerUserId == request.auth.uid && request.resource.data.organizerUserId == resource.data.organizerUserId);
+      allow update: if isAdmin() || (isAuthenticated() && resource.data.organizerUserId == request.auth.uid && request.resource.data.organizerUserId == resource.data.organizerUserId);
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
     }
 
@@ -105,8 +89,7 @@ service cloud.firestore {
       allow get: if isAdmin() || isConversationParticipant(conversationId);
       allow list: if isAdmin();
       allow create: if isAdmin() || (isAuthenticated() && request.auth.uid in request.resource.data.participants);
-      allow update: if isAdmin() ||
-        (isConversationParticipant(conversationId) && request.resource.data.participants == resource.data.participants);
+      allow update: if isAdmin() || (isConversationParticipant(conversationId) && request.resource.data.participants == resource.data.participants);
       allow delete: if isAdmin();
       match /messages/{messageId} {
         allow get, list: if isAdmin() || isConversationParticipant(conversationId);
@@ -119,15 +102,13 @@ service cloud.firestore {
       allow get: if isAdmin() || (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
       allow list: if isAdmin();
       allow create: if isAdmin();
-      allow update, delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.recipientUserId == request.auth.uid && request.resource.data.recipientUserId == resource.data.recipientUserId);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.recipientUserId == request.auth.uid && request.resource.data.recipientUserId == resource.data.recipientUserId);
     }
 
     match /userReviews/{reviewId} {
       allow get, list: if true;
       allow create: if isAdmin() || (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
-      allow update, delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.authorUserId == request.auth.uid && request.resource.data.authorUserId == resource.data.authorUserId);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid && request.resource.data.authorUserId == resource.data.authorUserId);
     }
 
     match /verifiedReferences/{referenceId} {
@@ -138,8 +119,7 @@ service cloud.firestore {
     match /careerTimelines/{timelineId} {
       allow get, list: if true;
       allow create: if isAdmin() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
-      allow update, delete: if isAdmin() ||
-        (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
+      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == resource.data.userId);
     }
 
     match /verifications/{verificationId} {
@@ -179,7 +159,6 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // Server-only operational state. Firebase client SDKs must never mutate these collections.
     match /aiUsageDaily/{usageId} { allow read, write: if false; }
     match /mercadopagoWebhookEvents/{eventId} { allow read, write: if false; }
 
