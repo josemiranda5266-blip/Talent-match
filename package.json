@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
-    "sync:public-athletes": "tsx scripts/sync-public-athletes.ts"
+    "sync:public-athletes": "tsx scripts/sync-public-athletes.ts",
+    "sync:public-discovery": "tsx scripts/sync-public-discovery.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
