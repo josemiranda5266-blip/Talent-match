@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+.vite
+coverage
+dist
+*.log
+.env
+.env.*
+!*.env.example
+TYPECHECK_FAILURE.txt
+README*.md
