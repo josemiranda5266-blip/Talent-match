@@ -1,0 +1,36 @@
+name: Add Premium Expiration
+on:
+  push:
+    branches: [production-hardening]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+      - name: Patch webhook expiration
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('server.ts')
+          s = p.read_text()
+          old = "      transaction.set(userRef,{isPremium:true,premium:true,plan:'PRO',subscriptionPlanId:reference.planId||null,premiumActivatedAt:(admin as any).firestore.FieldValue.serverTimestamp(),premiumPaymentId:String(payment.id),premiumAmountArs:transactionAmount,premiumCoupon:coupon||null,premiumSource:'mercadopago'},{merge:true});"
+          new = "      const currentData=userSnap.data()||{};\n      const currentExpiration=currentData.premiumExpiresAt;\n      const currentExpirationMs=typeof currentExpiration?.toMillis==='function'?currentExpiration.toMillis():new Date(currentExpiration||0).getTime();\n      const baseMs=Number.isFinite(currentExpirationMs)&&currentExpirationMs>Date.now()?currentExpirationMs:Date.now();\n      const premiumExpiresAt=new Date(baseMs+30*24*60*60*1000);\n      transaction.set(userRef,{isPremium:true,premium:true,plan:'PRO',subscriptionPlanId:reference.planId||null,premiumActivatedAt:(admin as any).firestore.FieldValue.serverTimestamp(),premiumExpiresAt,premiumPaymentId:String(payment.id),premiumAmountArs:transactionAmount,premiumCoupon:coupon||null,premiumSource:'mercadopago'},{merge:true});"
+          if old not in s:
+              raise SystemExit('Expected Premium transaction line not found')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+      - name: Commit and remove one-shot workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'fix(premium): expire and extend paid entitlement by 30 days'
+          git rm .github/workflows/fix-premium-expiration.yml
+          git commit -m 'ci: remove one-shot premium expiration patcher'
+          git push origin production-hardening
