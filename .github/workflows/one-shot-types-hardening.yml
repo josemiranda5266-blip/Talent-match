@@ -16,7 +16,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-      - name: Apply safe TypeScript fixes
+      - name: Apply strict TypeScript fixes
         shell: bash
         run: |
           python3 <<'PY'
@@ -32,30 +32,38 @@ jobs:
                   print('updated', path)
 
           edit('src/components/AdminPanelView.tsx', lambda s: s
-              .replace("=== 'atleta'", "=== 'athlete'")
-              .replace("=== 'open'", "=== 'pending'")
-              .replace("=== 'detected'", "=== 'active'")
-              .replace("=== 'under_review'", "=== 'investigating'")
-              .replace('.documentType', '.dniNumber')
-              .replace('.documentUrl', '.dniDocumentUrl')
-              .replace('.appealText', '.appealMessage')
-              .replace('.reportedName', '.reporterName')
-              .replace('.reportedId', '.reporterId')
+              .replace('alert.type', "(alert as FraudAlert & { type?: string }).type")
+              .replace('rep.reportedUserId || rep.reporterId', 'rep.reportedUserId')
+              .replace('onClick={() => handleResolveFraudAlert(alert.id)}', "onClick={() => { if (alert.id) handleResolveFraudAlert(alert.id); }}")
           )
 
-          for f in ['src/components/CandidateModal.tsx','src/components/ChatModal.tsx','src/components/TeamsDirectoryView.tsx']:
-              edit(f, lambda s: re.sub(r'\s+title=("[^"]*"|\{[^}]*\})', '', s))
+          edit('src/components/AthleteView.tsx', lambda s: s
+              .replace('Array.from(new Set([...updatedStats.achievements, ...data.keyAchievements]))', 'Array.from(new Set([...(updatedStats.achievements ?? []), ...data.keyAchievements]))')
+              .replace('const updatedStats = { ...formData.stats };', "const updatedStats = {\n      matchesPlayed: formData.stats?.matchesPlayed ?? 0,\n      goalsOrPoints: formData.stats?.goalsOrPoints ?? 0,\n      assists: formData.stats?.assists,\n      minutesPlayed: formData.stats?.minutesPlayed,\n      achievements: formData.stats?.achievements ?? [],\n    };")
+          )
 
-          edit('src/components/ChatModal.tsx', lambda s: s.replace('messages[messages.length - 1].', 'messages[messages.length - 1]?.'))
+          edit('src/components/ChatModal.tsx', lambda s: s.replace('setActiveConversationId(list[0].id);', 'setActiveConversationId(list[0]?.id ?? null);'))
 
-          for f in ['src/components/CreateSearchModal.tsx','src/components/AthleteView.tsx','src/components/TeamsDirectoryView.tsx','src/components/TalentRadarModal.tsx','src/components/TournamentsView.tsx']:
-              edit(f, lambda s: s.replace("new Date().toISOString().split('T')[0]", "new Date().toISOString().split('T')[0] ?? new Date().toISOString()"))
+          edit('src/components/ClubView.tsx', lambda s: s.replace(
+              'onInviteCandidate={(athId) => {\n          onOpenCandidateModal(athletes.find(a => a.id === athId) || athletes[0]);\n        }}',
+              'onInviteCandidate={(athId) => {\n          const candidate = athletes.find(a => a.id === athId);\n          if (candidate) onOpenCandidateModal(candidate);\n        }}'
+          ))
 
-          edit('src/components/TalentRadarModal.tsx', lambda s: s.replace('<option key={s} value={s}>{s}</option>', '<option key={s.name} value={s.name}>{s.name}</option>'))
-          edit('src/components/ClubView.tsx', lambda s: s.replace('openCandidateModal(selectedAthlete);', 'if (selectedAthlete) openCandidateModal(selectedAthlete);'))
-          edit('src/components/SmartFeedView.tsx', lambda s: re.sub(r'\bathleteObj\.([A-Za-z_$][\w$]*)', r'athleteObj?.\1', s))
-          edit('src/components/OnboardingModal.tsx', lambda s: s.replace('const currentData = onboardingData[currentStep];', 'const currentData = onboardingData[currentStep] ?? {};'))
-          edit('src/components/ReviewsAndReferencesModal.tsx', lambda s: s.replace('user.avatar', "(user as UserProfile & { avatar?: string }).avatar"))
+          edit('src/components/OnboardingModal.tsx', lambda s: s.replace('const currentData = steps[currentStep];', 'const currentData = steps[currentStep] ?? steps[0];'))
+
+          edit('src/components/ReviewsAndReferencesModal.tsx', lambda s: s.replace('currentUser.avatar', "(currentUser as UserProfile & { avatar?: string }).avatar"))
+
+          edit('src/components/SmartFeedView.tsx', lambda s: s.replace(
+              'const athleteObj = currentAthlete || allCandidates[0];\n',
+              'const athleteObj = currentAthlete || allCandidates[0];\n  if (!athleteObj) return null;\n'
+          ))
+
+          edit('src/components/TournamentsView.tsx', lambda s: s
+              .replace('PRESET_BANNERS[0].url', "PRESET_BANNERS[0]?.url ?? ''")
+              .replace('t.contactWhatsApp.replace(', "(t.contactWhatsApp ?? '').replace(")
+              .replace('selectedTournamentDetail.contactWhatsApp.replace(', "(selectedTournamentDetail.contactWhatsApp ?? '').replace(")
+              .replace('contactWhatsApp})', "contactWhatsApp ?? ''})")
+          )
           PY
 
           bun install --frozen-lockfile
@@ -68,7 +76,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src
           if ! git diff --cached --quiet; then
-            git commit -m 'fix(types): apply strict TypeScript hardening batch'
+            git commit -m 'fix(types): close remaining strict component errors'
             git push
           fi
           exit $status
