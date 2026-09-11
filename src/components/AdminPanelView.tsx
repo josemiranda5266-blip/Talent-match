@@ -1307,11 +1307,11 @@ export const AdminPanelView: React.FC = () => {
                         Riesgo {alert.severity.toUpperCase()}
                       </span>
                       <h4 className="text-sm font-bold text-white">
-                        {alert.type === 'duplicate_profile'
+                        {(alert as FraudAlert & { type?: string }).type === 'duplicate_profile'
                           ? 'Posible Perfil Duplicado / Múltiples Cuentas'
-                          : alert.type === 'reused_document'
+                          : (alert as FraudAlert & { type?: string }).type === 'reused_document'
                           ? 'Documento de Identidad Reutilizado'
-                          : alert.type === 'fake_tryout_fee'
+                          : (alert as FraudAlert & { type?: string }).type === 'fake_tryout_fee'
                           ? 'Cobro Irregular de Dinero por Pruebas'
                           : 'Comportamiento Sospechoso'}
                       </h4>
@@ -1330,7 +1330,7 @@ export const AdminPanelView: React.FC = () => {
                       Suspender
                     </button>
                     <button
-                      onClick={() => handleResolveFraudAlert(alert.id)}
+                      onClick={() => { if (alert.id) handleResolveFraudAlert(alert.id); }}
                       className="px-3.5 py-1.5 bg-[#00ff41] hover:bg-[#00ff41]/90 text-black font-extrabold text-xs uppercase rounded-xl"
                     >
                       Resolver Alerta
@@ -1380,13 +1380,13 @@ export const AdminPanelView: React.FC = () => {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
-                        onClick={() => handleSuspendAccount(rep.reportedUserId || rep.reporterId, rep.reporterName || 'Usuario')}
+                        onClick={() => handleSuspendAccount(rep.reportedUserId, rep.reporterName || 'Usuario')}
                         className="px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-xs uppercase rounded-xl hover:bg-amber-500/30"
                       >
                         Suspender
                       </button>
                       <button
-                        onClick={() => handleBanAccount(rep.reportedUserId || rep.reporterId, rep.reporterName || 'Usuario')}
+                        onClick={() => handleBanAccount(rep.reportedUserId, rep.reporterName || 'Usuario')}
                         className="px-3 py-1.5 bg-rose-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-rose-600 shadow-lg shadow-rose-500/20"
                       >
                         BAN Definitivo

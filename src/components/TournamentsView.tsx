@@ -77,7 +77,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
   const [contactWhatsApp, setContactWhatsApp] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactInstagram, setContactInstagram] = useState('');
-  const [bannerImage, setBannerImage] = useState(PRESET_BANNERS[0].url);
+  const [bannerImage, setBannerImage] = useState(PRESET_BANNERS[0]?.url ?? '');
 
   // Payment Form State
   const [cardNumber, setCardNumber] = useState('');
@@ -124,7 +124,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
       contactWhatsApp,
       contactEmail,
       contactInstagram,
-      bannerImage: bannerImage || PRESET_BANNERS[0].url,
+      bannerImage: bannerImage || PRESET_BANNERS[0]?.url ?? '',
       isVerifiedOrganizer: true,
       createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString() ?? new Date().toISOString(),
       status: 'Inscripciones Abiertas',
@@ -168,7 +168,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
     setContactWhatsApp('');
     setContactEmail('');
     setContactInstagram('');
-    setBannerImage(PRESET_BANNERS[0].url);
+    setBannerImage(PRESET_BANNERS[0]?.url ?? '');
     setCardNumber('');
     setCardHolder('');
     setCardExpiry('');
@@ -387,7 +387,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
                 )}
 
                 <a
-                  href={`https://wa.me/${t.contactWhatsApp.replace(/[^0-9]/g, '')}?text=Hola!%20Quisiera%20inscribir%20mi%20equipo%20en%20el%20torneo%20${encodeURIComponent(
+                  href={`https://wa.me/${(t.contactWhatsApp ?? '').replace(/[^0-9]/g, '')}?text=Hola!%20Quisiera%20inscribir%20mi%20equipo%20en%20el%20torneo%20${encodeURIComponent(
                     t.title
                   )}.`}
                   target="_blank"
@@ -1058,7 +1058,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
                 )}
 
                 <a
-                  href={`https://wa.me/${selectedTournamentDetail.contactWhatsApp.replace(
+                  href={`https://wa.me/${(selectedTournamentDetail.contactWhatsApp ?? '').replace(
                     /[^0-9]/g,
                     ''
                   )}?text=Hola!%20Deseo%20más%20información%20para%20inscribir%20un%20equipo%20en%20el%20torneo%20${encodeURIComponent(
@@ -1068,7 +1068,7 @@ export const TournamentsView: React.FC<TournamentsViewProps> = ({
                   rel="noopener noreferrer"
                   className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white font-black text-xs uppercase tracking-wider rounded-2xl border border-white/10 flex items-center justify-center gap-2 transition-all"
                 >
-                  <MessageSquare className="w-4 h-4 text-[#00ff41]" /> Contactar por WhatsApp ({selectedTournamentDetail.contactWhatsApp})
+                  <MessageSquare className="w-4 h-4 text-[#00ff41]" /> Contactar por WhatsApp ({selectedTournamentDetail.contactWhatsApp ?? ''})
                 </a>
               </div>
             </div>

@@ -96,6 +96,7 @@ export const SmartFeedView: React.FC<SmartFeedViewProps> = ({
 
   // Calculations for athlete
   const athleteObj = currentAthlete || allCandidates[0];
+  if (!athleteObj) return null;
   const inverseMatches = calculateInverseMatches(athleteObj, activeSearches);
   const predictions: PredictiveSuccessModel = calculatePredictiveSuccess(athleteObj, activeSearches);
   const smartGoals: SmartGoalItem[] = generateSmartGoals(athleteObj);

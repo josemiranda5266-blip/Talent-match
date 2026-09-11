@@ -568,7 +568,8 @@ export const ClubView: React.FC<ClubViewProps> = ({
         candidates={selectedCandidatesForComparison}
         searchContext={activeSearch}
         onInviteCandidate={(athId) => {
-          onOpenCandidateModal(athletes.find(a => a.id === athId) || athletes[0]);
+          const candidate = athletes.find(a => a.id === athId);
+          if (candidate) onOpenCandidateModal(candidate);
         }}
       />
 

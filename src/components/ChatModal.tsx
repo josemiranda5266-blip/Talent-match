@@ -79,7 +79,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
           setActiveConversationId(convId);
         });
       } else if (!activeConversationId && list.length > 0) {
-        setActiveConversationId(list[0].id);
+        setActiveConversationId(list[0]?.id ?? null);
       }
     });
 

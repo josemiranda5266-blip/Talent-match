@@ -121,9 +121,15 @@ export const AthleteView: React.FC<AthleteViewProps> = ({
   };
 
   const handleApplyAIData = (data: { bio: string; sportsExperience: string; keyAchievements: string[] }) => {
-    const updatedStats = { ...formData.stats };
+    const updatedStats = {
+      matchesPlayed: formData.stats?.matchesPlayed ?? 0,
+      goalsOrPoints: formData.stats?.goalsOrPoints ?? 0,
+      assists: formData.stats?.assists,
+      minutesPlayed: formData.stats?.minutesPlayed,
+      achievements: formData.stats?.achievements ?? [],
+    };
     if (data.keyAchievements.length > 0) {
-      updatedStats.achievements = Array.from(new Set([...updatedStats.achievements, ...data.keyAchievements]));
+      updatedStats.achievements = Array.from(new Set([...(updatedStats.achievements ?? []), ...data.keyAchievements]));
     }
 
     const updatedAthlete = {

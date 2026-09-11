@@ -94,7 +94,7 @@ export const ReviewsAndReferencesModal: React.FC<ReviewsAndReferencesModalProps>
         authorUserId: currentUser.uid,
         authorName: currentUser.displayName || 'Usuario Verificado',
         authorRole: currentUser.role,
-        authorAvatar: currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+        authorAvatar: (currentUser as UserProfile & { avatar?: string }).avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
         authorVerified: currentUser.isVerified || false,
         punctualityScore: punctuality,
         professionalismScore: professionalism,
