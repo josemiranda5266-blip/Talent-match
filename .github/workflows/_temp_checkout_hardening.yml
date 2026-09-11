@@ -1,4 +1,5 @@
 name: temp checkout hardening
+# Triggered after installation commit so the repository-side patch executes once.
 on:
   push:
     branches: [production-hardening]
