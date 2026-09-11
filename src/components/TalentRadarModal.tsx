@@ -78,7 +78,7 @@ export const TalentRadarModal: React.FC<TalentRadarModalProps> = ({
       active: true,
       notifyEmail,
       notifyPush,
-      createdAt: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
       matchesCount: 0
     };
 
@@ -315,7 +315,7 @@ export const TalentRadarModal: React.FC<TalentRadarModalProps> = ({
                     className="w-full bg-[#0a0a0c] border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:border-[#00ff41] outline-none"
                   >
                     {SPORTS_LIST.map((s) => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s.name} value={s.name}>{s.name}</option>
                     ))}
                   </select>
                 </div>

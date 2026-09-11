@@ -97,7 +97,7 @@ export const CandidateModal: React.FC<CandidateModalProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="text-xl font-black text-white uppercase italic tracking-tight">{athlete.name}</h2>
                 {athlete.isVerified && (
-                  <CheckCircle2 className="w-4 h-4 text-[#00ff41]" title="Perfil Verificado" />
+                  <CheckCircle2 className="w-4 h-4 text-[#00ff41]" />
                 )}
                 {athlete.isPremium && (
                   <span className="bg-[#00ff41] text-black text-[10px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider flex items-center gap-1">

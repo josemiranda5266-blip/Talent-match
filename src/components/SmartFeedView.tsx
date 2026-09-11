@@ -123,7 +123,7 @@ export const SmartFeedView: React.FC<SmartFeedViewProps> = ({
 
             <h1 className="text-2xl sm:text-4xl font-black text-white italic tracking-tight uppercase">
               {isAthlete ? (
-                <>Hola <span className="text-[#00ff41]">{athleteObj.name}</span>, ¡Tu Feed Inteligente está Listo!</>
+                <>Hola <span className="text-[#00ff41]">{athleteObj?.name}</span>, ¡Tu Feed Inteligente está Listo!</>
               ) : (
                 <>Ecosistema de Scouting e Inteligencia Deportiva</>
               )}
@@ -378,7 +378,7 @@ export const SmartFeedView: React.FC<SmartFeedViewProps> = ({
                 <div className="bg-[#0a0a0c] p-4 rounded-2xl border border-white/10 space-y-2">
                   <span className="text-xs text-white/50 uppercase font-bold">Encaje Categorías Superiores</span>
                   <p className="text-lg font-bold text-amber-400">{predictions.superiorCategoryFit}</p>
-                  <p className="text-xs text-white/70">Basado en tu nivel {athleteObj.level} y verificaciones.</p>
+                  <p className="text-xs text-white/70">Basado en tu nivel {athleteObj?.level} y verificaciones.</p>
                 </div>
               </div>
 

@@ -211,7 +211,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
                 <div>
                   <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
                     {otherParticipant.name}
-                    <ShieldCheck className="w-4 h-4 text-[#00ff41]" title="Perfil Verificado" />
+                    <ShieldCheck className="w-4 h-4 text-[#00ff41]" />
                   </h3>
                   <p className="text-[10px] text-white/50 uppercase font-bold tracking-wider">
                     {otherParticipant.role === 'club' ? 'Club / Entrenador' : 'Deportista / Atleta'} • En línea
@@ -296,7 +296,6 @@ export const ChatModal: React.FC<ChatModalProps> = ({
               type="button"
               onClick={() => setShowMediaField(!showMediaField)}
               className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-[#00ff41] transition-all"
-              title="Adjuntar imagen o video"
             >
               <Paperclip className="w-4 h-4" />
             </button>

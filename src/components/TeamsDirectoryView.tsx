@@ -114,7 +114,7 @@ export const TeamsDirectoryView: React.FC<TeamsDirectoryViewProps> = ({
       lookingForFriendlies: newLookingForFriendlies,
       isFreeListing: true,
       isVerified: true,
-      createdAt: new Date().toISOString().split('T')[0],
+      createdAt: new Date().toISOString().split('T')[0] ?? new Date().toISOString(),
       memberCount: 15,
     };
 
@@ -372,7 +372,7 @@ export const TeamsDirectoryView: React.FC<TeamsDirectoryViewProps> = ({
                           {team.category.split('/')[0]}
                         </span>
                         {team.isVerified && (
-                          <ShieldCheck className="w-3.5 h-3.5 text-[#00ff41]" title="Equipo Verificado" />
+                          <ShieldCheck className="w-3.5 h-3.5 text-[#00ff41]" />
                         )}
                       </div>
                       <h3 className="text-base font-black text-white uppercase italic mt-1 leading-snug">
@@ -435,7 +435,6 @@ export const TeamsDirectoryView: React.FC<TeamsDirectoryViewProps> = ({
                 <button
                   onClick={() => setSelectedTeamForDetail(team)}
                   className="px-3 py-2.5 bg-white/5 hover:bg-white/10 text-white font-bold text-xs uppercase rounded-xl border border-white/10 transition-colors"
-                  title="Ver Perfil Completo"
                 >
                   <Info className="w-4 h-4" />
                 </button>

@@ -548,7 +548,7 @@ export const AdminPanelView: React.FC = () => {
         <div className="bg-[#161618] p-4 rounded-2xl border border-white/10 space-y-1">
           <span className="text-[10px] text-white/40 uppercase block font-bold">Atletas Registrados</span>
           <strong className="text-lg sm:text-xl font-black text-white font-mono">
-            {users.filter(u => u.role === 'atleta').length || 112}
+            {users.filter(u => u.role === 'athlete').length || 112}
           </strong>
         </div>
 
@@ -1369,7 +1369,7 @@ export const AdminPanelView: React.FC = () => {
                           {rep.reason || 'Sanción'}
                         </span>
                         <h4 className="text-sm font-bold text-white">
-                          Denunciado: {rep.reportedName || rep.reportedUserName || rep.reportedUserId}
+                          Denunciado: {rep.reporterName || rep.reportedUserName || rep.reportedUserId}
                         </h4>
                       </div>
                       <p className="text-xs text-white/80">{rep.description}</p>
@@ -1380,13 +1380,13 @@ export const AdminPanelView: React.FC = () => {
 
                     <div className="flex items-center gap-2 shrink-0">
                       <button
-                        onClick={() => handleSuspendAccount(rep.reportedUserId || rep.reportedId, rep.reportedName || 'Usuario')}
+                        onClick={() => handleSuspendAccount(rep.reportedUserId || rep.reporterId, rep.reporterName || 'Usuario')}
                         className="px-3 py-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold text-xs uppercase rounded-xl hover:bg-amber-500/30"
                       >
                         Suspender
                       </button>
                       <button
-                        onClick={() => handleBanAccount(rep.reportedUserId || rep.reportedId, rep.reportedName || 'Usuario')}
+                        onClick={() => handleBanAccount(rep.reportedUserId || rep.reporterId, rep.reporterName || 'Usuario')}
                         className="px-3 py-1.5 bg-rose-500 text-white font-bold text-xs uppercase rounded-xl hover:bg-rose-600 shadow-lg shadow-rose-500/20"
                       >
                         BAN Definitivo
