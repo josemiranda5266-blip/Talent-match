@@ -22,13 +22,20 @@ service cloud.firestore {
       allow get: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
       allow list: if isAdmin();
       allow create: if isAdmin() || (isAuthenticated() && request.auth.uid == userId &&
-        !request.resource.data.keys().hasAny(['isPremium', 'premium', 'plan']));
+        !request.resource.data.keys().hasAny(['isPremium', 'premium', 'plan', 'premiumExpiresAt', 'subscriptionPlanId', 'premiumActivatedAt', 'premiumPaymentId', 'premiumAmountArs', 'premiumCoupon', 'premiumSource']));
       allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId &&
         request.resource.data.uid == resource.data.uid &&
         request.resource.data.role == resource.data.role &&
         request.resource.data.isPremium == resource.data.isPremium &&
         request.resource.data.premium == resource.data.premium &&
-        request.resource.data.plan == resource.data.plan);
+        request.resource.data.plan == resource.data.plan &&
+        request.resource.data.premiumExpiresAt == resource.data.premiumExpiresAt &&
+        request.resource.data.subscriptionPlanId == resource.data.subscriptionPlanId &&
+        request.resource.data.premiumActivatedAt == resource.data.premiumActivatedAt &&
+        request.resource.data.premiumPaymentId == resource.data.premiumPaymentId &&
+        request.resource.data.premiumAmountArs == resource.data.premiumAmountArs &&
+        request.resource.data.premiumCoupon == resource.data.premiumCoupon &&
+        request.resource.data.premiumSource == resource.data.premiumSource);
       allow delete: if isAdmin();
     }
 
