@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
@@ -12,150 +11,210 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'admin' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isConversationParticipant(conversationId) {
       return isAuthenticated() &&
-        (request.auth.token.role == 'admin' ||
-         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+        exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
     }
 
-    // Users Collection
+    // User accounts: private by default. Public discovery must use a dedicated
+    // public profile projection, not the canonical user document.
     match /users/{userId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && isOwner(userId) && (request.resource.data.role != 'admin' || isAdmin());
-      allow update: if isAdmin() || (isOwner(userId) && (request.resource.data.role == resource.data.role || (!isAdmin() && request.resource.data.role != 'admin')));
+      allow get: if isAdmin() || isOwner(userId);
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) &&
+        request.resource.data.role != 'admin';
+      allow update: if isAdmin() ||
+        (isOwner(userId) &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.uid == resource.data.uid);
       allow delete: if isAdmin();
     }
 
-    // Athletes Collection
+    // Athlete records can only be accessed by the owner or an administrator.
+    // Public scouting/search results should be served from a sanitized public
+    // collection or an authorized backend endpoint.
     match /athletes/{athleteId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || athleteId == request.auth.uid);
-      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || athleteId == request.auth.uid || isAdmin());
+      allow get: if isAdmin() ||
+        (isAuthenticated() &&
+          (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() &&
+        (request.resource.data.userId == request.auth.uid || athleteId == request.auth.uid);
+      allow update: if isAdmin() ||
+        (isAuthenticated() &&
+          (resource.data.userId == request.auth.uid || athleteId == request.auth.uid));
       allow delete: if isAdmin();
     }
 
-    // Searches Collection (Convocatorias de Clubes)
+    // Club searches/conventions can be publicly discoverable only through a
+    // sanitized projection/API. Direct Firestore access is restricted.
     match /searches/{searchId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && (request.resource.data.clubId == request.auth.uid || isAdmin());
-      allow update: if isAuthenticated() && (resource.data.clubId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin() || (isAuthenticated() && resource.data.clubId == request.auth.uid);
+      allow get: if isAuthenticated() || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() &&
+        (request.resource.data.clubId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() ||
+        (isAuthenticated() && resource.data.clubId == request.auth.uid);
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.clubId == request.auth.uid);
     }
 
-    // Applications Collection
+    // Applications are private. In particular, authenticated users must not
+    // be able to list every application in the system.
     match /applications/{applicationId} {
-      allow list: if isAuthenticated();
-      allow get: if isAuthenticated() && (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && (request.resource.data.athleteId == request.auth.uid || isAdmin());
-      allow update: if isAuthenticated() && (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin() || (isAuthenticated() && resource.data.athleteId == request.auth.uid);
+      allow get: if isAdmin() ||
+        (isAuthenticated() &&
+          (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.athleteId == request.auth.uid);
+      allow update: if isAdmin() ||
+        (isAuthenticated() &&
+          (resource.data.athleteId == request.auth.uid || resource.data.clubId == request.auth.uid));
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.athleteId == request.auth.uid);
     }
 
-    // Teams / Directory Collection
     match /teams/{teamId} {
-      allow read: if true;
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (resource.data.ownerUserId == request.auth.uid || resource.data.id == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
+      allow get: if isAuthenticated() || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() &&
+        (request.resource.data.ownerUserId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() ||
+        (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.ownerUserId == request.auth.uid);
     }
 
-    // Tournaments Collection
     match /tournaments/{tournamentId} {
-      allow read: if true;
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (resource.data.organizerUserId == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
+      allow get: if isAuthenticated() || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isAuthenticated() &&
+        (request.resource.data.organizerUserId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() ||
+        (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
+      allow delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.organizerUserId == request.auth.uid);
     }
 
-    // Conversations & Messages
+    // Conversations and messages: participants only.
     match /conversations/{conversationId} {
-      allow list: if isAuthenticated();
-      allow get: if isAuthenticated() && (request.auth.uid in resource.data.participants || isAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid in request.resource.data.participants || isAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid in resource.data.participants || isAdmin());
+      allow get: if isAdmin() || isConversationParticipant(conversationId);
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.auth.uid in request.resource.data.participants);
+      allow update: if isAdmin() || isConversationParticipant(conversationId);
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read: if isAuthenticated() && (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants || isAdmin());
-        allow create: if isAuthenticated() && request.auth.uid == request.resource.data.senderId;
-        allow update, delete: if isAdmin();
+        allow get, list: if isAdmin() || isConversationParticipant(conversationId);
+        allow create: if isAdmin() ||
+          (isConversationParticipant(conversationId) &&
+            request.resource.data.senderId == request.auth.uid);
+        allow update, delete: if isAdmin() ||
+          (isConversationParticipant(conversationId) &&
+            resource.data.senderId == request.auth.uid);
       }
     }
 
-    // Notifications
+    // Notifications are private and must not be forgeable by arbitrary users.
+    // Creation should normally happen server-side with Admin SDK.
     match /notifications/{notificationId} {
-      allow list: if isAuthenticated();
-      allow get: if isAuthenticated() && (resource.data.recipientUserId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (resource.data.recipientUserId == request.auth.uid || isAdmin());
+      allow get: if isAdmin() ||
+        (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.recipientUserId == request.auth.uid);
     }
 
-    // Reviews & Ratings (UserReviews)
+    // Reviews are public-facing content, but creation must be tied to the author.
     match /userReviews/{reviewId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && (request.resource.data.authorUserId == request.auth.uid || isAdmin());
-      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.authorUserId == request.auth.uid);
+      allow get, list: if true;
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.authorUserId == request.auth.uid);
+      allow update, delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.authorUserId == request.auth.uid);
     }
 
-    // Verified References (Club & Trainer references)
+    // Verified references must be moderated/server-created.
     match /verifiedReferences/{referenceId} {
-      allow read: if true;
-      allow create: if isAuthenticated();
-      allow update, delete: if isAdmin();
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
     }
 
-    // Career Timelines
     match /careerTimelines/{timelineId} {
-      allow read: if true;
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
-      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow get, list: if true;
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
+      allow update, delete: if isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
 
-    // Verifications (Identity & Accreditation Requests)
+    // Identity/accreditation data is private.
     match /verifications/{verificationId} {
-      allow list: if isAuthenticated();
-      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     match /verificationRequests/{requestId} {
-      allow list: if isAuthenticated();
-      allow get: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
-    // Reports & Moderation
+    // Reports, fraud alerts and moderation logs are administrative/private.
     match /reports/{reportId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated() && (request.resource.data.reporterUserId == request.auth.uid || isAdmin());
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
     match /userReports/{reportId} {
-      allow list: if isAuthenticated();
-      allow get: if isAdmin() || (isAuthenticated() && resource.data.reporterUserId == request.auth.uid);
-      allow create: if isAuthenticated() && (request.resource.data.reporterUserId == request.auth.uid || isAdmin());
+      allow get: if isAdmin() ||
+        (isAuthenticated() && resource.data.reporterUserId == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.reporterUserId == request.auth.uid);
       allow update, delete: if isAdmin();
     }
 
-    // Fraud Alerts (Anti-Spam & Trust)
     match /fraudAlerts/{alertId} {
       allow read, write: if isAdmin();
     }
 
-    // Moderation Audit Logs
     match /moderationAuditLogs/{logId} {
       allow read, write: if isAdmin();
     }
 
-    // Account Appeals
     match /accountAppeals/{appealId} {
-      allow list: if isAuthenticated();
-      allow get: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if isAdmin() ||
+        (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow list: if isAdmin();
+      allow create: if isAdmin() ||
+        (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update, delete: if isAdmin();
+    }
+
+    // Default deny: new collections are private until explicitly reviewed.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
