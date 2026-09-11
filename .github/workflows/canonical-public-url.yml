@@ -17,7 +17,6 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
 
           p = Path('server.ts')
           text = p.read_text()
@@ -30,31 +29,42 @@ jobs:
                   raise SystemExit('PORT marker not found')
               text = text.replace(marker, marker + helper, 1)
 
-          patterns = [
-              r"const (\\w+) = `\\$\\{req\\.protocol\\}://\\$\\{req\\.get\\(['\"]host['\"]\\)\\}`;",
-              r"const (\\w+) = `\\$\\{req\\.protocol\\}://\\$\\{req\\.get\\(\\\"host\\\"\\)\\}`;",
-          ]
           replacements = 0
-          for pattern in patterns:
-              text, count = re.subn(pattern, lambda m: f"const {m.group(1)} = getPublicAppUrl(req);", text)
-              replacements += count
+          replacements += text.count("const notificationUrl=`${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;")
+          text = text.replace(
+              "const notificationUrl=`${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;",
+              "const publicAppUrl=getPublicAppUrl(req);const notificationUrl=`${publicAppUrl}/api/mercadopago/webhook`;",
+          )
+          replacements += text.count("const backUrl=`${req.protocol}://${req.get('host')}?payment_status=approved`;")
+          text = text.replace(
+              "const backUrl=`${req.protocol}://${req.get('host')}?payment_status=approved`;",
+              "const backUrl=`${publicAppUrl}?payment_status=approved`;",
+          )
+          replacements += text.count("failure:`${req.protocol}://${req.get('host')}?payment_status=failure`")
+          text = text.replace(
+              "failure:`${req.protocol}://${req.get('host')}?payment_status=failure`",
+              "failure:`${publicAppUrl}?payment_status=failure`",
+          )
 
-          # Also replace the common inline form if present.
-          inline = re.compile(r"`\\$\\{req\\.protocol\\}://\\$\\{req\\.get\\(['\"]host['\"]\\)\\}`")
-          text, count = inline.subn("getPublicAppUrl(req)", text)
-          replacements += count
-
-          if replacements == 0:
-              raise SystemExit('No request-derived public URL construction found; refusing to make a no-op production patch')
+          if replacements != 3:
+              raise SystemExit(f'Expected 3 Mercado Pago URL replacements, got {replacements}')
 
           p.write_text(text)
-          print(f'Replaced {replacements} request-derived public URL construction(s)')
+          print(f'Replaced {replacements} Mercado Pago callback URL constructions')
 
-      - name: Verify no production request-derived payment URLs remain
+      - name: Verify canonical URL enforcement
+        shell: python
         run: |
-          ! grep -nE "req\\.protocol.*req\\.get\\(['\"]host['\"]\\)" server.ts
-          grep -n "getPublicAppUrl(req)" server.ts
-          grep -n "PUBLIC_APP_URL" server.ts
+          from pathlib import Path
+          import re
+          text = Path('server.ts').read_text()
+          assert text.count('function getPublicAppUrl(req: any)') == 1
+          assert text.count('getPublicAppUrl(req)') >= 1
+          assert 'PUBLIC_APP_URL' in text
+          assert text.count("${req.protocol}://${req.get('host')}") == 1
+          assert 'const notificationUrl=`${publicAppUrl}/api/mercadopago/webhook`;' in text
+          assert 'back_urls:{success:backUrl,pending:backUrl,failure:`${publicAppUrl}?payment_status=failure`}' in text
+          print('Canonical PUBLIC_APP_URL enforcement verified')
 
       - name: Quality gate
         run: |
@@ -64,8 +74,6 @@ jobs:
 
       - name: Commit patch and remove temporary workflow
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
