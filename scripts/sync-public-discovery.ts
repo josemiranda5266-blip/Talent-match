@@ -1,10 +1,11 @@
-import * as admin from 'firebase-admin';
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getFirestore, FieldValue, type DocumentData } from 'firebase-admin/firestore';
 
-if (!admin.apps.length) {
-  admin.initializeApp();
+if (!getApps().length) {
+  initializeApp();
 }
 
-const db = admin.firestore();
+const db = getFirestore();
 const BATCH_SIZE = 450;
 
 type SourceDefinition = {
@@ -46,7 +47,7 @@ const SOURCES: SourceDefinition[] = [
   },
 ];
 
-function sanitize(data: FirebaseFirestore.DocumentData, fields: readonly string[]) {
+function sanitize(data: DocumentData, fields: readonly string[]) {
   const result: Record<string, unknown> = {};
   for (const field of fields) {
     if (data[field] !== undefined) result[field] = data[field];
@@ -75,7 +76,7 @@ async function syncSource(definition: SourceDefinition) {
           // Keep the publication gate explicit so an unpublished source can
           // never become visible merely because the sync job ran.
           published: sourceData.published === false ? false : true,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         },
         // Full replacement prevents fields removed from the allowlist/source
         // from lingering in an older public projection.
@@ -113,6 +114,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Public discovery projection sync failed:', error);
+  console.error('Public discovery synchronization failed:', error);
   process.exitCode = 1;
 });
