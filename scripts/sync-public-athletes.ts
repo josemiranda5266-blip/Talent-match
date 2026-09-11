@@ -6,14 +6,14 @@ if (!admin.apps.length) {
 
 const db = admin.firestore();
 
+// Public discovery intentionally excludes precise body measurements and response
+// telemetry. Detailed profile data remains available through authenticated flows.
 const PUBLIC_FIELDS = [
   'name',
   'avatar',
   'sport',
   'position',
   'age',
-  'heightCm',
-  'weightKg',
   'city',
   'province',
   'level',
@@ -25,7 +25,6 @@ const PUBLIC_FIELDS = [
   'rating',
   'verificationTier',
   'activityLevel',
-  'avgResponseMinutes',
 ] as const;
 
 function sanitizeAthlete(data: FirebaseFirestore.DocumentData) {
@@ -45,7 +44,6 @@ async function main() {
   const sourceIds = new Set(athleteSnapshot.docs.map((document) => document.id));
   const publicDocs = publicSnapshot.docs;
 
-  // Upsert sanitized projections in chunks below Firestore's 500-operation limit.
   for (let offset = 0; offset < athleteSnapshot.docs.length; offset += 450) {
     const batch = db.batch();
     const chunk = athleteSnapshot.docs.slice(offset, offset + 450);
@@ -57,13 +55,12 @@ async function main() {
         ...sanitizeAthlete(data),
         published: data.availableForTrials !== false,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      }, { merge: false });
     }
 
     if (chunk.length > 0) await batch.commit();
   }
 
-  // Remove stale public projections after source records are deleted.
   for (let offset = 0; offset < publicDocs.length; offset += 450) {
     const batch = db.batch();
     const chunk = publicDocs.slice(offset, offset + 450);
