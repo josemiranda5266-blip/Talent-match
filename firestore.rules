@@ -31,7 +31,12 @@ service cloud.firestore {
       allow update: if isAdmin() ||
         (isOwner(userId) &&
           request.resource.data.role == resource.data.role &&
-          request.resource.data.uid == resource.data.uid);
+          request.resource.data.uid == resource.data.uid &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'isPremium',
+            'premium',
+            'plan'
+          ]));
       allow delete: if isAdmin();
     }
 
