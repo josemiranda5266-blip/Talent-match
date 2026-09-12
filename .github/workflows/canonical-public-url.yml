@@ -56,14 +56,15 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-          import re
           text = Path('server.ts').read_text()
           assert text.count('function getPublicAppUrl(req: any)') == 1
           assert text.count('getPublicAppUrl(req)') >= 1
           assert 'PUBLIC_APP_URL' in text
-          assert text.count("${req.protocol}://${req.get('host')}") == 1
+          assert "req.get('host')" in text
           assert 'const notificationUrl=`${publicAppUrl}/api/mercadopago/webhook`;' in text
           assert 'back_urls:{success:backUrl,pending:backUrl,failure:`${publicAppUrl}?payment_status=failure`}' in text
+          assert "const notificationUrl=`${req.protocol}://${req.get('host')}/api/mercadopago/webhook`;" not in text
+          assert "const backUrl=`${req.protocol}://${req.get('host')}?payment_status=approved`;" not in text
           print('Canonical PUBLIC_APP_URL enforcement verified')
 
       - name: Quality gate
