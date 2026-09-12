@@ -27,19 +27,22 @@ service firebase.storage {
 
     match /users/{userId}/{allPaths=**} {
       allow read: if isOwner(userId) || isAdmin();
-      allow write: if (isOwner(userId) || isAdmin()) && validUpload();
+      allow create, update: if (isOwner(userId) || isAdmin()) && validUpload();
+      allow delete: if isOwner(userId) || isAdmin();
     }
 
     // Athlete media is private by default. Public-facing media must be copied
     // to /public through a trusted publication flow.
     match /athletes/{userId}/{allPaths=**} {
       allow read: if isOwner(userId) || isAdmin();
-      allow write: if (isOwner(userId) || isAdmin()) && validUpload();
+      allow create, update: if (isOwner(userId) || isAdmin()) && validUpload();
+      allow delete: if isOwner(userId) || isAdmin();
     }
 
     match /public/{allPaths=**} {
       allow read: if true;
-      allow write: if isAdmin() && validUpload();
+      allow create, update: if isAdmin() && validUpload();
+      allow delete: if isAdmin();
     }
 
     match /{allPaths=**} {
