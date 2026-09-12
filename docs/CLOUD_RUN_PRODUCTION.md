@@ -37,7 +37,10 @@ Configurar como mínimo:
 
 ```text
 NODE_ENV=production
+PUBLIC_APP_URL=https://<your-public-domain>
 ```
+
+`PUBLIC_APP_URL` debe ser la URL HTTPS pública y estable de TalentMatch. En producción el backend rechaza una URL ausente, inválida o no HTTPS para evitar generar callbacks/redirects de Mercado Pago incorrectos.
 
 No fijar manualmente `PORT`: Cloud Run lo inyecta.
 
@@ -73,10 +76,11 @@ Mantener configurados `MERCADOPAGO_WEBHOOK_SECRET` y `MERCADOPAGO_ACCESS_TOKEN`.
 2. Publicarla en Artifact Registry.
 3. Crear/actualizar el servicio Cloud Run usando la imagen.
 4. Inyectar secretos desde Secret Manager.
-5. Asignar el service account mínimo necesario.
-6. Verificar `/api/health`.
-7. Verificar autenticación Firebase y una operación de lectura no sensible.
-8. Verificar Mercado Pago únicamente con credenciales reales y una transacción controlada.
+5. Configurar `NODE_ENV=production` y `PUBLIC_APP_URL` con la URL HTTPS real.
+6. Asignar el service account mínimo necesario.
+7. Verificar `/api/health`.
+8. Verificar autenticación Firebase y una operación de lectura no sensible.
+9. Verificar Mercado Pago únicamente con credenciales reales y una transacción controlada.
 
 No ejecutar una migración de datos ni cambiar reglas de Firestore como parte del primer despliegue sin una copia/plan de rollback.
 
