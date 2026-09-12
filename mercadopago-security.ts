@@ -6,8 +6,6 @@ const firebaseAuth = () => (admin as any).auth();
 const db = getFirestore();
 const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);
 const COUPON_DISCOUNTS = new Map<string, number>([
-  ['TALENT100', 100],
-  ['PROMO100', 100],
   ['PROMO50', 50],
   ['ARGENTINA50', 50],
   ['PRO2025', 30],
@@ -166,7 +164,6 @@ export async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: 
     const coupon = normalizeCoupon(reference.coupon);
     const canonicalBasePrice = resolveCanonicalBasePrice(referencedPrice, coupon);
     if (canonicalBasePrice === null) return res.status(403).json({ error: 'El importe o cupón del pago no corresponde a un plan autorizado.' });
-    if (coupon && calculateCouponPrice(canonicalBasePrice, coupon).finalPrice === 0) return res.status(403).json({ error: 'No se puede confirmar un pago de importe cero.' });
     const expectedFinalPrice = calculateCouponPrice(canonicalBasePrice, coupon).finalPrice;
     if (transactionAmount !== expectedFinalPrice || referencedPrice !== expectedFinalPrice) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe autorizado.' });
     if (Number.isFinite(expectedRequestedAmount) && expectedRequestedAmount > 0 && transactionAmount !== expectedRequestedAmount) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe esperado.' });
