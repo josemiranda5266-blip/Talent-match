@@ -1,0 +1,45 @@
+name: Temporary coupon client hardening
+
+on:
+  push:
+    paths:
+      - '.github/workflows/_patch_coupon_client.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: production-hardening
+      - name: Patch checkout coupon request
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/components/CheckoutModal.tsx')
+          s=p.read_text()
+          old="body: JSON.stringify({ code, originalPrice: plan.priceMonthly }),"
+          new="body: JSON.stringify({ code, planId: plan.id }),"
+          if old not in s: raise SystemExit('coupon request not found')
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/components/CheckoutModal.tsx
+          git commit -m 'fix: validate coupons against canonical plan id'
+          git push origin production-hardening
+      - name: Remove temporary workflow
+        if: always()
+        run: |
+          git fetch origin production-hardening
+          git checkout production-hardening
+          git pull --ff-only origin production-hardening
+          git rm .github/workflows/_patch_coupon_client.yml || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore: remove temporary coupon workflow' || true
+          git push origin production-hardening || true
