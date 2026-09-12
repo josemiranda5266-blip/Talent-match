@@ -4,7 +4,18 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 const firebaseAuth = () => (admin as any).auth();
 const db = getFirestore();
-const ALLOWED_PLAN_PRICES_ARS = new Set([14900, 49900, 129000]);
+const CANONICAL_PLANS = new Map<string, { priceArs: number; name: string }>([
+  ['plan-ath-pro', { priceArs: 4990, name: 'PRO Deportista' }],
+  ['plan-club-pro', { priceArs: 19900, name: 'PRO Club' }],
+]);
+const ALLOWED_PLAN_PRICES_ARS = new Set([...CANONICAL_PLANS.values()].map(plan => plan.priceArs));
+
+export function getCanonicalPlan(planId: unknown): { id: string; priceArs: number; name: string } | null {
+  if (typeof planId !== 'string') return null;
+  const id = planId.trim();
+  const plan = CANONICAL_PLANS.get(id);
+  return plan ? { id, ...plan } : null;
+}
 const COUPON_DISCOUNTS = new Map<string, number>([
   ['PROMO50', 50],
   ['ARGENTINA50', 50],
@@ -122,13 +133,15 @@ export async function requireMercadoPagoCredential(_req: any, res: any, next: an
 }
 
 export function enforceServerPrice(req: any, res: any, next: any) {
-  const price = Number(req.body?.priceMonthly);
+  const plan = getCanonicalPlan(req.body?.planId);
   const coupon = normalizeCoupon(req.body?.couponCode);
-  if (!Number.isSafeInteger(price) || !ALLOWED_PLAN_PRICES_ARS.has(price)) return res.status(400).json({ error: 'Plan o precio no autorizado por el servidor.' });
+  if (!plan) return res.status(400).json({ error: 'Plan no autorizado por el servidor.' });
   if (req.body?.userId && req.body.userId !== req.user?.uid) return res.status(403).json({ error: 'El usuario del pago no coincide con la sesión autenticada.' });
   req.body.userId = req.user.uid;
   req.body.userEmail = req.user.email || undefined;
-  req.body.priceMonthly = price;
+  req.body.planId = plan.id;
+  req.body.planName = plan.name;
+  req.body.priceMonthly = plan.priceArs;
   if (coupon && !COUPON_DISCOUNTS.has(coupon)) return res.status(400).json({ error: 'Cupón no autorizado.' });
   return next();
 }
@@ -161,8 +174,10 @@ export async function verifyPaymentAgainstMercadoPago(req: any, res: any, next: 
     const referencedPrice = Number(reference.price);
     const expectedRequestedAmount = Number(req.body?.amount);
     if (payment.status !== 'approved' || reference.userId !== req.user?.uid) return res.status(403).json({ error: 'El pago no está aprobado o no pertenece al usuario autenticado.' });
+    const referencePlan = getCanonicalPlan(reference.planId);
+    if (!referencePlan || referencePlan.priceArs !== resolveCanonicalBasePrice(referencedPrice, reference.coupon)) return res.status(403).json({ error: 'El plan del pago no corresponde a un plan autorizado.' });
     const coupon = normalizeCoupon(reference.coupon);
-    const canonicalBasePrice = resolveCanonicalBasePrice(referencedPrice, coupon);
+    const canonicalBasePrice = referencePlan.priceArs;
     if (canonicalBasePrice === null) return res.status(403).json({ error: 'El importe o cupón del pago no corresponde a un plan autorizado.' });
     const expectedFinalPrice = calculateCouponPrice(canonicalBasePrice, coupon).finalPrice;
     if (transactionAmount !== expectedFinalPrice || referencedPrice !== expectedFinalPrice) return res.status(403).json({ error: 'El importe confirmado por Mercado Pago no coincide con el importe autorizado.' });
