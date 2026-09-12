@@ -35,7 +35,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, p
       const response = await fetch('/api/mercadopago/validate-coupon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ code, originalPrice: plan.priceMonthly }),
+        body: JSON.stringify({ code, planId: plan.id }),
       });
       const data = await response.json();
       if (!response.ok || !data.valid || data.discountPercent === 100) {
