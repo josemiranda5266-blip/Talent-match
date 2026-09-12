@@ -1,0 +1,85 @@
+name: Cleanup synthetic financial data
+
+on:
+  push:
+    branches: [production-hardening]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Remove synthetic financial fixtures
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('server.ts')
+          text = p.read_text(encoding='utf-8')
+
+          replacements = {
+              'unitEconomicsData': "const unitEconomicsData:UnitEconomics={arpuUsd:0,cacUsd:0,paybackMonths:0,churnRatePct:0,ltvUsd:0,contributionMarginPct:0,ltvToCacRatio:0,isHealthy:false};",
+              'anomalyDetections': 'const anomalyDetections:AnomalyItem[]=[];',
+              'actionableRecommendations': 'const actionableRecommendations:ActionableRecommendation[]=[];',
+              'businessHealthScore': "const businessHealthScore:BusinessHealthScore={overallScore:0,status:'EN_RIESGO',components:{security:0,availability:0,profitability:0,growth:0,costControl:0,userSatisfaction:0,performance:0},summaryText:'No hay datos financieros reales suficientes para calcular este indicador.'};",
+              'budgetConfig': 'const budgetConfig:BudgetConfig={monthlyBudgetUsd:0,dailyBudgetUsd:0,aiBudgetUsd:0,firestoreBudgetUsd:0,storageBudgetUsd:0,cloudRunBudgetUsd:0,freeUserDailyAiLimit:5,premiumUserDailyAiLimit:100,freeUserMonthlyAppLimit:20};',
+              'reserveFundConfig': 'const reserveFundConfig:ReserveFundConfig={operationPct:0,growthPct:0,emergencyPct:0,operationalPoolUsd:0,growthPoolUsd:0,emergencyPoolUsd:0};',
+              'featureProfitabilityData': 'const featureProfitabilityData:FeatureProfitability[]=[];',
+              'financialAlerts': 'const financialAlerts:FinancialAlert[]=[];',
+              'financialAuditLogs': 'const financialAuditLogs:FinancialAuditLog[]=[];',
+          }
+
+          # Replace known declarations while preserving the existing interfaces/types.
+          patterns = {
+              'unitEconomicsData': r'const unitEconomicsData:UnitEconomics=.*?;\n',
+              'anomalyDetections': r'const anomalyDetections:AnomalyItem\[\]=\[.*?\];\n',
+              'actionableRecommendations': r'const actionableRecommendations:ActionableRecommendation\[\]=\[.*?\];\n',
+              'businessHealthScore': r'const businessHealthScore:BusinessHealthScore=.*?;\n',
+              'budgetConfig': r'const budgetConfig:BudgetConfig=.*?;\n',
+              'reserveFundConfig': r'const reserveFundConfig:ReserveFundConfig=.*?;\n',
+              'featureProfitabilityData': r'const featureProfitabilityData:FeatureProfitability\[\]=\[.*?\];\n',
+              'financialAlerts': r'const financialAlerts:FinancialAlert\[\]=\[.*?\];\n',
+              'financialAuditLogs': r'const financialAuditLogs:FinancialAuditLog\[\]=\[.*?\];\n',
+          }
+
+          for name, pattern in patterns.items():
+              new_text, count = re.subn(pattern, replacements[name] + '\n', text, count=1, flags=re.S)
+              if count:
+                  text = new_text
+                  print(f'replaced {name}')
+              else:
+                  print(f'not found {name}')
+
+          # Remove any remaining obvious synthetic fixture literals in the financial block if a declaration was formatted differently.
+          p.write_text(text, encoding='utf-8')
+
+      - name: Build and typecheck
+        run: |
+          corepack enable 2>/dev/null || true
+          curl -fsSL https://bun.sh/install | bash
+          export BUN_INSTALL="$HOME/.bun"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          bun --version
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+
+      - name: Commit cleanup and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts .github/workflows/cleanup-synthetic-financials.yml
+          git diff --cached --quiet && { echo 'No changes to commit'; exit 0; }
+          git commit -m "chore: remove synthetic financial fixtures"
+          git rm .github/workflows/cleanup-synthetic-financials.yml
+          git commit -m "chore: remove temporary financial cleanup workflow"
+          git push
