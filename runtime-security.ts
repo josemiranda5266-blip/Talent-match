@@ -153,7 +153,32 @@ export function markFinancialDataAsModelled(req: any, res: any, next: any) {
 export function markAnalyticsDataAsModelled(_req: any, res: any, next: any) {
   const originalJson = res.json.bind(res);
   res.json = (body: any) => {
-    if (body && typeof body === 'object' && !Array.isArray(body)) body = { ...body, analyticsDataSource: 'MODELLED', productionMetricsConnected: false, dataWarning: 'Estas métricas son de modelo/simulación y no representan telemetría de producción verificada.' };
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      body = {
+        ...body,
+        infrastructure: {
+          firestoreReads: 0,
+          firestoreWrites: 0,
+          storageBandwidthMb: 0,
+          geminiTokensUsed: 0,
+          estimatedMonthlyCostUsd: 0,
+          estimatedMonthlyCostArs: 0,
+        },
+        businessKpis: {
+          totalUsers: 0,
+          activeClubs: 0,
+          activeAthletes: 0,
+          proSubscribers: 0,
+          monthlyRevenueArs: 0,
+          freeToProConversionRate: '0%',
+          topSearchedSports: [],
+          topProvinces: [],
+        },
+        analyticsDataSource: 'MODELLED',
+        productionMetricsConnected: false,
+        dataWarning: 'No hay telemetría de producción conectada. Estos valores son neutrales y no representan métricas reales.',
+      };
+    }
     return originalJson(body);
   };
   return next();
