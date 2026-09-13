@@ -22,7 +22,10 @@ export async function requireAuthenticated(req: any, res: any, next: any) {
 export async function requireAdmin(req: any, res: any, next: any) {
   if (!req.user) return requireAuthenticated(req, res, () => requireAdmin(req, res, next));
   const claims = req.user || {};
-  if (claims.admin === true || claims.role === 'admin') return next();
+  if (claims.admin === true || claims.role === 'admin') {
+    res.setHeader('Cache-Control', 'no-store');
+    return next();
+  }
   return res.status(403).json({ error: 'Se requieren permisos administrativos.' });
 }
 
