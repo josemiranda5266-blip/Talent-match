@@ -81,7 +81,7 @@ const paymentLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 25, standardHe
 
 app.use('/api/', generalLimiter);
 app.use('/api/ai/', requireAuthenticated, aiLimiter, enforceAiBudget, sanitizeAiErrorResponse);
-app.use('/api/financial/', requireAuthenticated, markFinancialDataAsModelled);
+app.use('/api/financial/', requireAuthenticated, requireAdmin, markFinancialDataAsModelled);
 app.use('/api/financial/summary', requireAdmin);
 app.use('/api/financial/reserve-config', requireAdmin);
 app.use('/api/financial/executive-report', requireAdmin);
