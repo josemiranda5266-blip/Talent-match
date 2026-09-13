@@ -167,6 +167,14 @@ Histórico: hubo workflows temporales de hardening que ya fueron eliminados.
 
 **Pendiente inmediato:** localizar todas las llamadas a `seedInitialFirestoreDataIfNeeded`, todas las rutas `requireAdmin`/`/api/admin`, y consultas frontend afectadas por las nuevas Firestore rules.
 
+### 2026-09-13 — Registro creado y persistido en Git
+
+**Acción:** se creó y luego se actualizó este archivo en `production-hardening`.
+
+**Evidencia:** commit de creación `2c72fc157a33ff8003570ec91a6434b8f053bb12`; actualización de este registro en el commit posterior que contiene esta entrada.
+
+**Nota:** el registro queda como fuente persistente del estado del proyecto. Antes de la próxima intervención se debe leer este archivo y continuar desde sus pendientes, no repetir auditorías ya documentadas salvo que exista evidencia de cambio.
+
 ## Plan de trabajo siguiente
 
 1. Auditar exhaustivamente endpoints administrativos y operaciones privilegiadas.
