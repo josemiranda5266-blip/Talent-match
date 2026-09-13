@@ -1,0 +1,103 @@
+name: One-shot production hardening
+
+on:
+  push:
+    branches:
+      - production-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: contains(github.event.head_commit.message, 'chore(hardening): apply production demo isolation')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Isolate synthetic UI state and analytics
+        shell: python
+        run: |
+          from pathlib import Path
+
+          app = Path('src/App.tsx')
+          text = app.read_text()
+
+          old_growth_start = "  const [growthProfile, setGrowthProfile] = useState<UserGrowthProfile>({\n"
+          growth_marker = "\n\n  const [reviewsModalTarget"
+          start = text.find(old_growth_start)
+          end = text.find(growth_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('growthProfile block not found')
+          block = text[start:end]
+          object_start = block.find('useState<UserGrowthProfile>({')
+          object_body = block[block.find('{', object_start):block.rfind('});') + 1]
+          empty_growth = "{\n    referralCode: '',\n    totalReferrals: 0,\n    successfulConversions: 0,\n    points: 0,\n    currentLevel: 'Promesa',\n    profileCompletionPercent: 0,\n    unlockedRewards: [],\n    achievements: [],\n  }"
+          replacement = "  const [growthProfile, setGrowthProfile] = useState<UserGrowthProfile>(isDemoMode() ? " + object_body + " : " + empty_growth + ");"
+          text = text[:start] + replacement + text[end:]
+
+          old_apps = """  const [applications, setApplications] = useState<SearchApplication[]>([\n    {\n      id: 'app-1',\n      searchId: 'search-1',\n      athleteId: 'ath-1',\n      appliedAt: '2026-07-28',\n      status: 'Citado a Prueba',\n      noteFromAthlete: 'Disponible para viajar a Santiago del Estero la fecha de la prueba.',\n      matchScore: 94,\n    },\n  ]);"""
+          new_apps = """  const [applications, setApplications] = useState<SearchApplication[]>(demoActive ? [\n    {\n      id: 'app-1',\n      searchId: 'search-1',\n      athleteId: 'ath-1',\n      appliedAt: '2026-07-28',\n      status: 'Citado a Prueba',\n      noteFromAthlete: 'Disponible para viajar a Santiago del Estero la fecha de la prueba.',\n      matchScore: 94,\n    },\n  ] : []);"""
+          if old_apps not in text:
+              raise SystemExit('applications synthetic block not found')
+          text = text.replace(old_apps, new_apps, 1)
+
+          text = text.replace("  const [isAthletePro, setIsAthletePro] = useState<boolean>(true);", "  const [isAthletePro, setIsAthletePro] = useState<boolean>(demoActive);")
+          text = text.replace("  const [isClubPro, setIsClubPro] = useState<boolean>(false);", "  const [isClubPro, setIsClubPro] = useState<boolean>(false);")
+
+          old_notifications = """  const [notifications, setNotifications] = useState([\n    {\n      id: 'n-1',\n      title: '¡Nueva Búsqueda en tu Deporte!',\n      message: 'Central Córdoba busca Defensor Central para prueba presencial en Santiago del Estero.',\n      time: 'Hace 10 min',\n      unread: true,\n      type: 'match' as const,\n    },\n    {\n      id: 'n-2',\n      title: 'Visita a tu Video Highlight',\n      message: 'Un scout de Atenas de Córdoba vio tu video de mejores jugadas.',\n      time: 'Hace 2 horas',\n      unread: true,\n      type: 'view' as const,\n    },\n  ]);"""
+          new_notifications = """  const [notifications, setNotifications] = useState(demoActive ? [\n    {\n      id: 'n-1',\n      title: '¡Nueva Búsqueda en tu Deporte!',\n      message: 'Central Córdoba busca Defensor Central para prueba presencial en Santiago del Estero.',\n      time: 'Hace 10 min',\n      unread: true,\n      type: 'match' as const,\n    },\n    {\n      id: 'n-2',\n      title: 'Visita a tu Video Highlight',\n      message: 'Un scout de Atenas de Córdoba vio tu video de mejores jugadas.',\n      time: 'Hace 2 horas',\n      unread: true,\n      type: 'view' as const,\n    },\n  ] : []);"""
+          if old_notifications not in text:
+              raise SystemExit('notifications synthetic block not found')
+          text = text.replace(old_notifications, new_notifications, 1)
+
+          old_profile = """          setCurrentUser(profile);\n          setCurrentRole(profile.role === 'admin' ? 'club' : (profile.role as UserRole));"""
+          new_profile = """          setCurrentUser(profile);\n          setCurrentRole(profile.role === 'admin' ? 'club' : (profile.role as UserRole));\n          if (!demoActive) {\n            setIsAthletePro(Boolean(profile.role === 'athlete' && profile.isPremium));\n            setIsClubPro(Boolean(profile.role === 'club' && profile.isPremium));\n          }"""
+          if old_profile not in text:
+              raise SystemExit('auth profile block not found')
+          text = text.replace(old_profile, new_profile, 1)
+
+          app.write_text(text)
+
+          server = Path('server.ts')
+          st = server.read_text()
+          old_analytics = "app.get('/api/analytics/summary',(_req,res)=>res.json({timestamp:new Date().toISOString(),infrastructure:{firestoreReads:14280,firestoreWrites:1890,storageBandwidthMb:4120,geminiTokensUsed:128500,estimatedMonthlyCostUsd:14.5,estimatedMonthlyCostArs:18850},businessKpis:{totalUsers:148,activeClubs:24,activeAthletes:112,proSubscribers:38,monthlyRevenueArs:566200,freeToProConversionRate:'25.6%',topSearchedSports:[{sport:'Fútbol',percent:62},{sport:'Básquet',percent:18},{sport:'Vóley',percent:12},{sport:'Rugby',percent:8}],topProvinces:[{province:'Santiago del Estero',users:48},{province:'Buenos Aires',users:35},{province:'Córdoba',users:22},{province:'Santa Fe',users:18},{province:'Tucumán',users:14}]}}));"
+          new_analytics = "app.get('/api/analytics/summary',(_req,res)=>res.status(200).json({timestamp:new Date().toISOString(),status:'NO_DATA',source:'not_connected',infrastructure:null,businessKpis:null}));"
+          if old_analytics not in st:
+              raise SystemExit('hardcoded analytics route not found')
+          st = st.replace(old_analytics, new_analytics, 1)
+          server.write_text(st)
+
+          log = Path('docs/PRODUCTION_HARDENING_LOG_2026-09-13.md')
+          lt = log.read_text()
+          entry = """
+
+## 2026-09-13 — Aislamiento de estado sintético de UI y analytics
+
+- **Acción realizada:** se aislaron los defaults de demo de `src/App.tsx` para que `growthProfile`, `applications`, `notifications` y el estado PRO no arranquen con datos ficticios en producción.
+- **Corrección:** el estado demo solo se carga cuando `isDemoMode()` es verdadero; en producción los valores parten vacíos y el estado Premium se deriva del perfil autenticado.
+- **Analytics:** `/api/analytics/summary` deja de devolver KPIs hardcodeados y responde `status: NO_DATA` hasta disponer de una fuente persistente real.
+- **Seguridad:** no se modificaron `main` ni las reglas de autorización; el cambio reduce riesgo de presentar datos ficticios como reales.
+"""
+          if 'Aislamiento de estado sintético de UI y analytics' not in lt:
+              log.write_text(lt + entry)
+      
+      - name: Validate build
+        run: |
+          corepack enable || true
+          curl -fsSL https://bun.sh/install | bash
+          export BUN_INSTALL="$HOME/.bun"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          bun --version
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Commit changes and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/App.tsx server.ts docs/PRODUCTION_HARDENING_LOG_2026-09-13.md .github/workflows/one-shot-production-hardening.yml
+          git rm .github/workflows/one-shot-production-hardening.yml
+          git commit -m "fix(hardening): isolate production demo state and analytics"
+          git push
