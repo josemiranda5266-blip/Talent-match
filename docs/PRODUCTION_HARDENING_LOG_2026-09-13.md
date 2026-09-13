@@ -23,3 +23,9 @@ Rama: `production-hardening` (sin modificar `main`).
 5. Configurar en Cloud Run `NODE_ENV=production` y `PUBLIC_APP_URL` HTTPS real, además de los secretos de Mercado Pago y Gemini mediante Secret Manager.
 6. Verificar `/api/health`, autenticación y una operación no sensible en el servicio desplegado.
 7. Realizar una prueba controlada de Mercado Pago con credenciales reales y webhook firmado.
+
+## Estado de esta revisión
+
+- La rama sigue aislada de `main`.
+- Se mantiene el objetivo de no convertir datos modelados/demo en métricas de producción.
+- Se solicita una nueva ejecución de CI sobre el HEAD resultante para cerrar la validación técnica del artefacto.
