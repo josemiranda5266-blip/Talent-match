@@ -1,0 +1,31 @@
+name: Harden analytics metrics
+on:
+  push:
+    branches: [production-hardening]
+permissions:
+  contents: write
+jobs:
+  harden:
+    if: ${{ !contains(github.event.head_commit.message, '[analytics-hardening]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove synthetic analytics metrics
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('server.ts')
+          s = p.read_text()
+          old = "app.get('/api/analytics/summary',(_req,res)=>res.json({timestamp:new Date().toISOString(),infrastructure:{firestoreReads:14280,firestoreWrites:1890,storageBandwidthMb:4120,geminiTokensUsed:128500,estimatedMonthlyCostUsd:14.5,estimatedMonthlyCostArs:18850},businessKpis:{totalUsers:148,activeClubs:24,activeAthletes:112,proSubscribers:38,monthlyRevenueArs:566200,freeToProConversionRate:'25.6%',topSearchedSports:[{sport:'Fútbol',percent:62},{sport:'Básquet',percent:18},{sport:'Vóley',percent:12},{sport:'Rugby',percent:8}],topProvinces:[{province:'Santiago del Estero',users:48},{province:'Buenos Aires',users:35},{province:'Córdoba',users:22},{province:'Santa Fe',users:18},{province:'Tucumán',users:14}]}}));"
+          new = "app.get('/api/analytics/summary',(_req,res)=>res.json({timestamp:new Date().toISOString(),status:'NO_DATA',dataSource:'REAL_RUNTIME_ONLY',infrastructure:{firestoreReads:0,firestoreWrites:0,storageBandwidthMb:0,geminiTokensUsed:0,estimatedMonthlyCostUsd:0,estimatedMonthlyCostArs:0},businessKpis:{totalUsers:0,activeClubs:0,activeAthletes:0,proSubscribers:0,monthlyRevenueArs:0,freeToProConversionRate:null,topSearchedSports:[],topProvinces:[]},message:'No hay datos analíticos reales suficientes para mostrar métricas de producción.'}));"
+          if old not in s:
+              raise SystemExit('Synthetic analytics route not found; refusing to modify unknown content.')
+          p.write_text(s.replace(old, new, 1))
+      - name: Commit hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: remove synthetic analytics metrics [analytics-hardening]"
+          git push
