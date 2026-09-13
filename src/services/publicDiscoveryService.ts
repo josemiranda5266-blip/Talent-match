@@ -78,8 +78,11 @@ function filterAthletes(list: Athlete[], filters?: AthleteDiscoveryFilters): Ath
 }
 
 function isDemoMode(): boolean {
+  // Demo fixtures must never be enabled in a production Vite build, even if
+  // VITE_DEMO_MODE is accidentally present in the deployment environment.
+  if ((import.meta as any).env?.PROD) return false;
   const envDemo = (import.meta as any).env?.VITE_DEMO_MODE;
   if (envDemo === 'true' || envDemo === true) return true;
   if (envDemo === 'false' || envDemo === false) return false;
-  return !(import.meta as any).env?.PROD;
+  return true;
 }
