@@ -5,6 +5,7 @@ export {
   registerUser,
   loginWithGoogle,
   saveAthleteProfile,
+  seedInitialFirestoreDataIfNeeded,
 } from './firebaseServiceProductionOverrides';
 export {
   fetchPublicAthletes as fetchAthletes,
