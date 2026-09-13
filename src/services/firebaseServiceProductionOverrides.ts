@@ -41,6 +41,7 @@ export async function registerUser(
     city,
     province,
     selectedCategory,
+    isVerified: false,
     verificationStatus: 'none',
     createdAt: new Date().toISOString(),
   };
@@ -67,9 +68,10 @@ export async function registerUser(
       isVerified: false,
       contactEmail: email,
       contactPhone: phone,
-      rating: 5.0,
+      rating: 0,
+      userId: user.uid,
     };
-    await setDoc(doc(db, 'athletes', user.uid), { ...newAthlete, userId: user.uid });
+    await setDoc(doc(db, 'athletes', user.uid), newAthlete);
   }
   return profile;
 }
@@ -91,6 +93,7 @@ export async function loginWithGoogle(
     role: safeRole,
     photoURL: user.photoURL || undefined,
     selectedCategory,
+    isVerified: false,
     verificationStatus: 'none',
     createdAt: new Date().toISOString(),
   };
@@ -117,9 +120,10 @@ export async function loginWithGoogle(
       isVerified: false,
       contactEmail: user.email || '',
       contactPhone: '',
-      rating: 5.0,
+      rating: 0,
+      userId: user.uid,
     };
-    await setDoc(doc(db, 'athletes', user.uid), { ...newAthlete, userId: user.uid });
+    await setDoc(doc(db, 'athletes', user.uid), newAthlete);
   }
   return profile;
 }
