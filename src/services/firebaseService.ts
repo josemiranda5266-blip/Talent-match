@@ -1,5 +1,5 @@
 // Compatibility facade: preserve the legacy service API while routing public
-directory reads and media uploads through hardened implementations.
+// directory reads and media uploads through hardened implementations.
 export * from './firebaseServiceLegacy';
 export {
   registerUser,
