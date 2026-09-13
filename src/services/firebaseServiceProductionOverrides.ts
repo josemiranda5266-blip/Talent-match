@@ -2,6 +2,7 @@ import {
   auth,
   db,
   doc,
+  getDoc,
   setDoc,
   createUserWithEmailAndPassword,
   signInWithPopup,
@@ -10,6 +11,7 @@ import {
 } from '../lib/firebase';
 import { saveAthleteProfile as legacySaveAthleteProfile } from './firebaseServiceLegacy';
 import type { Athlete, UserRole } from '../types';
+import type { UserProfile } from './firebaseServiceLegacy';
 
 function normalizeRole(role: UserRole | 'admin'): Exclude<UserRole, 'admin'> {
   return role === 'admin' ? 'athlete' : role;
@@ -24,16 +26,13 @@ export async function registerUser(
   city: string = '',
   province: string = '',
   selectedCategory: string = 'Deportista'
-) {
+): Promise<UserProfile> {
   const safeRole = normalizeRole(role);
   const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
   const user = userCredential.user;
-
   if (displayName) await updateProfile(user, { displayName });
 
-  // Keep client-created profiles free of privileged/trust fields. Premium and verification
-  // entitlements are server/admin controlled by Firestore rules and backend workflows.
-  const profile = {
+  const profile: UserProfile = {
     uid: user.uid,
     email: user.email || email,
     displayName: displayName || email.split('@')[0] || email,
@@ -42,10 +41,9 @@ export async function registerUser(
     city,
     province,
     selectedCategory,
-    verificationStatus: 'none' as const,
+    verificationStatus: 'none',
     createdAt: new Date().toISOString(),
   };
-
   await setDoc(doc(db, 'users', user.uid), profile);
 
   if (safeRole === 'athlete') {
@@ -73,33 +71,27 @@ export async function registerUser(
     };
     await setDoc(doc(db, 'athletes', user.uid), { ...newAthlete, userId: user.uid });
   }
-
   return profile;
 }
 
 export async function loginWithGoogle(
   role: UserRole | 'admin' = 'athlete',
   selectedCategory: string = 'Deportista'
-) {
+): Promise<UserProfile> {
   const safeRole = normalizeRole(role);
-  const provider = new GoogleAuthProvider();
-  const result = await signInWithPopup(auth, provider);
+  const result = await signInWithPopup(auth, new GoogleAuthProvider());
   const user = result.user;
+  const snapshot = await getDoc(doc(db, 'users', user.uid));
+  if (snapshot.exists()) return snapshot.data() as UserProfile;
 
-  const existing = await (async () => {
-    const snapshot = await import('../lib/firebase').then(({ getDoc }) => getDoc(doc(db, 'users', user.uid)));
-    return snapshot.exists() ? snapshot.data() : null;
-  })();
-  if (existing) return existing;
-
-  const profile = {
+  const profile: UserProfile = {
     uid: user.uid,
     email: user.email || '',
     displayName: user.displayName || 'Usuario Google',
     role: safeRole,
     photoURL: user.photoURL || undefined,
     selectedCategory,
-    verificationStatus: 'none' as const,
+    verificationStatus: 'none',
     createdAt: new Date().toISOString(),
   };
   await setDoc(doc(db, 'users', user.uid), profile);
@@ -129,7 +121,6 @@ export async function loginWithGoogle(
     };
     await setDoc(doc(db, 'athletes', user.uid), { ...newAthlete, userId: user.uid });
   }
-
   return profile;
 }
 
