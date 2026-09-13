@@ -69,3 +69,13 @@ export async function loginWithGoogle(role: UserRole | 'admin' = 'athlete', sele
 export async function saveAthleteProfile(athlete: Athlete): Promise<void> {
   await legacySaveAthleteProfile(athlete);
 }
+
+/**
+ * Production facade: legacy demo seeding is intentionally disabled in production.
+ * Development/demo environments may still use the legacy seed implementation.
+ */
+export async function seedInitialFirestoreDataIfNeeded(): Promise<void> {
+  if ((import.meta as any).env?.PROD) return;
+  const { seedInitialFirestoreDataIfNeeded: legacySeed } = await import('./firebaseServiceLegacy');
+  await legacySeed();
+}
