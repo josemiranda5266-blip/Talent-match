@@ -48,5 +48,6 @@ export async function loginWithGoogle(
 }
 
 export async function saveAthleteProfile(athlete: Athlete): Promise<void> {
-  await legacySaveAthleteProfile({ ...athlete, userId: athlete.userId || athlete.id });
+  await legacySaveAthleteProfile(athlete);
+  await setDoc(doc(db, 'athletes', athlete.id), { userId: athlete.id }, { merge: true });
 }
