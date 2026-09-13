@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   harden:
-    if: contains(github.event.head_commit.message, 'chore(hardening): apply production demo isolation')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +42,6 @@ jobs:
           text = text.replace(old_apps, new_apps, 1)
 
           text = text.replace("  const [isAthletePro, setIsAthletePro] = useState<boolean>(true);", "  const [isAthletePro, setIsAthletePro] = useState<boolean>(demoActive);")
-          text = text.replace("  const [isClubPro, setIsClubPro] = useState<boolean>(false);", "  const [isClubPro, setIsClubPro] = useState<boolean>(false);")
 
           old_notifications = """  const [notifications, setNotifications] = useState([\n    {\n      id: 'n-1',\n      title: '¡Nueva Búsqueda en tu Deporte!',\n      message: 'Central Córdoba busca Defensor Central para prueba presencial en Santiago del Estero.',\n      time: 'Hace 10 min',\n      unread: true,\n      type: 'match' as const,\n    },\n    {\n      id: 'n-2',\n      title: 'Visita a tu Video Highlight',\n      message: 'Un scout de Atenas de Córdoba vio tu video de mejores jugadas.',\n      time: 'Hace 2 horas',\n      unread: true,\n      type: 'view' as const,\n    },\n  ]);"""
           new_notifications = """  const [notifications, setNotifications] = useState(demoActive ? [\n    {\n      id: 'n-1',\n      title: '¡Nueva Búsqueda en tu Deporte!',\n      message: 'Central Córdoba busca Defensor Central para prueba presencial en Santiago del Estero.',\n      time: 'Hace 10 min',\n      unread: true,\n      type: 'match' as const,\n    },\n    {\n      id: 'n-2',\n      title: 'Visita a tu Video Highlight',\n      message: 'Un scout de Atenas de Córdoba vio tu video de mejores jugadas.',\n      time: 'Hace 2 horas',\n      unread: true,\n      type: 'view' as const,\n    },\n  ] : []);"""
@@ -81,14 +79,14 @@ jobs:
 """
           if 'Aislamiento de estado sintético de UI y analytics' not in lt:
               log.write_text(lt + entry)
-      
+
       - name: Validate build
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install and build
         run: |
-          corepack enable || true
-          curl -fsSL https://bun.sh/install | bash
-          export BUN_INSTALL="$HOME/.bun"
-          export PATH="$BUN_INSTALL/bin:$PATH"
-          bun --version
           bun install --frozen-lockfile
           bun run build
 
